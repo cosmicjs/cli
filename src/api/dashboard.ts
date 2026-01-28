@@ -332,10 +332,11 @@ export async function createWorkflow(
   bucketSlug: string,
   data: CreateWorkflowData
 ): Promise<Workflow> {
-  const response = await post<{ workflow: Workflow }>('/ai/workflows', data, {
+  const response = await post<{ workflow?: Workflow; data?: Workflow; success?: boolean } & Workflow>('/ai/workflows', data, {
     bucketSlug,
   });
-  return response.workflow;
+  // Handle { workflow: {...} }, { data: {...} }, or direct {...} response formats
+  return response.workflow || response.data || response;
 }
 
 export async function updateWorkflow(
@@ -343,12 +344,12 @@ export async function updateWorkflow(
   workflowId: string,
   data: Partial<CreateWorkflowData>
 ): Promise<Workflow> {
-  const response = await patch<{ workflow: Workflow }>(
+  const response = await patch<{ workflow?: Workflow; data?: Workflow; success?: boolean } & Workflow>(
     `/ai/workflows/${workflowId}`,
     data,
     { bucketSlug }
   );
-  return response.workflow;
+  return response.workflow || response.data || response;
 }
 
 export async function deleteWorkflow(
@@ -454,10 +455,11 @@ export async function createAgent(
   bucketSlug: string,
   data: CreateAgentData
 ): Promise<Agent> {
-  const response = await post<{ agent: Agent }>('/ai/agents', data, {
+  const response = await post<{ agent?: Agent; data?: Agent; success?: boolean } & Agent>('/ai/agents', data, {
     bucketSlug,
   });
-  return response.agent;
+  // Handle { agent: {...} }, { data: {...} }, or direct {...} response formats
+  return response.agent || response.data || response;
 }
 
 export async function updateAgent(
@@ -465,12 +467,12 @@ export async function updateAgent(
   agentId: string,
   data: Partial<CreateAgentData>
 ): Promise<Agent> {
-  const response = await patch<{ agent: Agent }>(
+  const response = await patch<{ agent?: Agent; data?: Agent; success?: boolean } & Agent>(
     `/ai/agents/${agentId}`,
     data,
     { bucketSlug }
   );
-  return response.agent;
+  return response.agent || response.data || response;
 }
 
 export async function deleteAgent(
