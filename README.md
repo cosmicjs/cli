@@ -245,8 +245,8 @@ cosmic
 
 ```bash
 # Clone the repo
-git clone https://github.com/cosmicjs/cosmic-cli.git
-cd cosmic-cli
+git clone https://github.com/cosmicjs/cli.git
+cd cli
 
 # Install dependencies
 bun install
@@ -262,7 +262,7 @@ bun run dev
 
 - [Cosmic Documentation](https://www.cosmicjs.com/docs)
 - [Discord Community](https://discord.gg/MSCwQ7D6Mg)
-- [GitHub Issues](https://github.com/cosmicjs/cosmic-cli/issues)
+- [GitHub Issues](https://github.com/cosmicjs/cli/issues)
 
 ## License
 
