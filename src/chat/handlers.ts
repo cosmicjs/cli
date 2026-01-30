@@ -4,6 +4,7 @@
  */
 
 import * as api from '../api/dashboard.js';
+import { getSDKClient } from '../api/sdk.js';
 import type { AIToolResult } from '../types.js';
 
 /**
@@ -33,6 +34,8 @@ export async function executeToolCall(
         return await handleUnpublishObjects(args, bucketSlug);
       case 'list_object_types':
         return await handleListObjectTypes(bucketSlug);
+      case 'create_object_type':
+        return await handleCreateObjectType(args, bucketSlug);
 
       // Media tools
       case 'list_media':
@@ -220,6 +223,48 @@ async function handleListObjectTypes(bucketSlug: string): Promise<AIToolResult> 
         singular: type.singular,
         emoji: type.emoji,
       })),
+    },
+  };
+}
+
+async function handleCreateObjectType(
+  args: Record<string, unknown>,
+  bucketSlug: string
+): Promise<AIToolResult> {
+  // Use SDK's objectTypes.insertOne() method
+  // See: https://www.cosmicjs.com/docs/api/object-types#create-an-object-type
+  const sdkClient = getSDKClient(bucketSlug);
+  if (!sdkClient) {
+    return {
+      success: false,
+      error: 'SDK client not available. Check your bucket configuration.',
+    };
+  }
+  
+  const objectTypeData: Record<string, unknown> = {
+    title: args.title as string,
+  };
+  
+  // Add optional fields
+  if (args.slug) objectTypeData.slug = args.slug;
+  if (args.singular) objectTypeData.singular = args.singular;
+  if (args.emoji) objectTypeData.emoji = args.emoji;
+  if (args.metafields) objectTypeData.metafields = args.metafields;
+  if (args.singleton !== undefined) objectTypeData.singleton = args.singleton;
+  
+  const result = await sdkClient.objectTypes.insertOne(objectTypeData);
+  const objectType = result.object_type;
+
+  return {
+    success: true,
+    data: {
+      object_type: {
+        slug: objectType.slug,
+        title: objectType.title,
+        singular: objectType.singular,
+        emoji: objectType.emoji,
+      },
+      message: `Successfully created object type "${objectType.title}" with slug "${objectType.slug}"`,
     },
   };
 }

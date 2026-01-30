@@ -12,6 +12,7 @@ export interface CosmicConfig {
   currentObjectType?: string;
   defaultModel?: string;
   apiUrl?: string;
+  sdkUrl?: string;  // Custom SDK URL for local development (e.g., http://localhost:8080/v3)
 }
 
 export interface CosmicCredentials {

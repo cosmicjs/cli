@@ -3,6 +3,27 @@
  * AI-powered command-line interface for Cosmic CMS
  */
 
+// Load environment variables from .env file (optional, for development)
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { existsSync } from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Try to load .env from the CLI package directory (for development)
+// This is optional - the CLI works without it
+const envPath = join(__dirname, '..', '.env');
+if (existsSync(envPath)) {
+  // Dynamic import to avoid issues if dotenv isn't available
+  try {
+    const dotenv = await import('dotenv');
+    dotenv.config({ path: envPath });
+  } catch {
+    // Silently ignore if dotenv fails
+  }
+}
+
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createAuthCommands } from './commands/auth.js';
@@ -49,24 +70,32 @@ program
     await startChat(options);
   });
 
-// Handle no command - show status or start chat
+// Handle no command - show status and help
 program.action(async () => {
-  // If no arguments provided, show welcome and start chat
+  // If no arguments provided, show welcome and available commands
   const args = process.argv.slice(2);
   
   if (args.length === 0) {
     printWelcome();
     
     if (!isAuthenticated()) {
-      console.log(chalk.yellow('\nNot logged in.'));
+      console.log(chalk.yellow('Not logged in.'));
       console.log(`Run ${chalk.cyan('cosmic login')} to authenticate.`);
       console.log(`Or use ${chalk.cyan('cosmic use --bucket=<slug> --read-key=<key>')} for bucket access.`);
-      console.log(`\nRun ${chalk.cyan('cosmic --help')} for available commands.`);
-      return;
     }
-
-    // Start interactive chat
-    await startChat({});
+    
+    // Show available commands
+    console.log(chalk.dim('Available commands:'));
+    console.log(`  ${chalk.cyan('cosmic chat')}       Start interactive AI chat mode`);
+    console.log(`  ${chalk.cyan('cosmic login')}      Login to your Cosmic account`);
+    console.log(`  ${chalk.cyan('cosmic use')}        Set bucket context`);
+    console.log(`  ${chalk.cyan('cosmic ls')}         List objects in current bucket`);
+    console.log(`  ${chalk.cyan('cosmic get')}        Get an object by slug or ID`);
+    console.log(`  ${chalk.cyan('cosmic media')}      Media file operations`);
+    console.log(`  ${chalk.cyan('cosmic workflows')}  Workflow operations`);
+    console.log(`  ${chalk.cyan('cosmic agents')}     AI agent operations`);
+    console.log();
+    console.log(`Run ${chalk.cyan('cosmic --help')} for all commands and options.`);
   }
 });
 

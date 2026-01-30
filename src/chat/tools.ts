@@ -162,6 +162,52 @@ export function getToolDefinitions(): AITool[] {
         properties: {},
       },
     },
+    {
+      name: 'create_object_type',
+      description: 'Create a new object type (content type) in the bucket. Use this to define new content structures like posts, authors, categories, products, etc.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'The display title for the object type (e.g., "Blog Posts", "Authors")',
+          },
+          slug: {
+            type: 'string',
+            description: 'URL-friendly identifier (e.g., "blog-posts", "authors"). Auto-generated from title if not provided.',
+          },
+          singular: {
+            type: 'string',
+            description: 'Singular form of the title (e.g., "Blog Post", "Author")',
+          },
+          emoji: {
+            type: 'string',
+            description: 'Emoji icon for the object type (e.g., "📝", "👤", "🏷️")',
+          },
+          metafields: {
+            type: 'array',
+            description: 'Array of field definitions for this object type',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: 'Field display name' },
+                key: { type: 'string', description: 'Field key/identifier' },
+                type: { 
+                  type: 'string', 
+                  description: 'Field type: text, textarea, html-textarea, markdown, number, date, file, object, objects, switch, select-dropdown, radio-buttons, repeater' 
+                },
+                required: { type: 'boolean', description: 'Whether field is required' },
+              },
+            },
+          },
+          singleton: {
+            type: 'boolean',
+            description: 'If true, only one object of this type can exist (e.g., for settings pages)',
+          },
+        },
+        required: ['title'],
+      },
+    },
 
     // Media tools
     {

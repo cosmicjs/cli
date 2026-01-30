@@ -17,6 +17,7 @@ import {
   getConfigDir,
   setCredentials,
   getCredentials,
+  getApiUrl,
 } from '../config/store.js';
 import { authenticateWithBucketKeys } from '../auth/manager.js';
 import { formatContext, setContextFromString } from '../config/context.js';
@@ -24,7 +25,7 @@ import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
-import { clearSDKClient, getBucketKeys } from '../api/sdk.js';
+import { clearSDKClient, getBucketKeys, getApiEnv } from '../api/sdk.js';
 
 /**
  * Look up workspace ID from slug
@@ -137,6 +138,27 @@ function context(): void {
   display.keyValue('Project', getCurrentProjectSlug() || chalk.dim('not set'));
   display.keyValue('Bucket', getCurrentBucketSlug() || chalk.dim('not set'));
   display.keyValue('Model', getDefaultModel());
+
+  // Show API environment
+  const apiEnv = getApiEnv();
+  if (apiEnv === 'staging') {
+    display.keyValue('Environment', chalk.yellow('staging'));
+  } else {
+    display.keyValue('Environment', chalk.dim('production'));
+  }
+
+  // Show Dashboard API URL
+  const dapiUrl = getApiUrl();
+  const isCustomDapi = process.env.COSMIC_DAPI_URL;
+  if (isCustomDapi) {
+    display.keyValue('DAPI URL', chalk.yellow(dapiUrl) + chalk.dim(' (custom)'));
+  } else {
+    display.keyValue('DAPI URL', chalk.dim(dapiUrl));
+  }
+
+  // Show API environment
+  display.keyValue('API Environment', getApiEnv());
+
   display.newline();
   display.dim(`Config stored in: ${getConfigDir()}`);
 }
@@ -145,7 +167,7 @@ function context(): void {
  * Config set command
  */
 function configSet(key: string, value: string): void {
-  const validKeys = ['defaultModel', 'apiUrl'] as const;
+  const validKeys = ['defaultModel', 'apiUrl', 'sdkUrl'] as const;
 
   if (!validKeys.includes(key as any)) {
     display.error(`Invalid config key: ${key}`);
@@ -153,8 +175,14 @@ function configSet(key: string, value: string): void {
     process.exit(1);
   }
 
-  setConfigValue(key as 'defaultModel' | 'apiUrl', value);
+  setConfigValue(key as 'defaultModel' | 'apiUrl' | 'sdkUrl', value);
   display.success(`Set ${chalk.cyan(key)} to ${chalk.green(value)}`);
+
+  // Clear SDK client cache if URL changed
+  if (key === 'sdkUrl') {
+    clearSDKClient();
+    display.info('SDK client cache cleared. New URL will be used on next request.');
+  }
 }
 
 /**
@@ -204,10 +232,10 @@ async function workspaces(): Promise<void> {
       const slug = String(wsAny.slug || wsAny.id || '-').substring(0, 24).padEnd(24);
       const title = display.truncate(String(wsAny.title || '-'), 30).padEnd(30);
       const created = wsAny.created_at || wsAny.createdAt || wsAny.created;
-      
+
       console.log(`  ${chalk.cyan(slug)} ${title} ${display.formatDate(created as string)}`);
     }
-    
+
     display.newline();
   } catch (error) {
     spinner.fail('Failed to load workspaces');
@@ -263,10 +291,10 @@ async function projects(options: { workspace?: string; all?: boolean } = {}): Pr
       const id = String(projAny.id || projAny._id || '-').substring(0, 24).padEnd(24);
       const title = display.truncate(String(projAny.title || projAny.name || '-'), 30).padEnd(30);
       const created = projAny.created_at || projAny.createdAt || projAny.created;
-      
+
       console.log(`  ${chalk.cyan(id)} ${title} ${display.formatDate(created as string)}`);
     }
-    
+
     display.newline();
   } catch (error) {
     spinner.fail('Failed to load projects');
@@ -281,7 +309,8 @@ async function projects(options: { workspace?: string; all?: boolean } = {}): Pr
 async function models(): Promise<void> {
   try {
     spinner.start('Loading models...');
-    const modelList = await api.listModels();
+    const bucketSlug = getCurrentBucketSlug();
+    const modelList = await api.listModels(bucketSlug);
     spinner.succeed(`Found ${modelList.length} model(s)`);
 
     if (modelList.length === 0) {
@@ -289,25 +318,28 @@ async function models(): Promise<void> {
       return;
     }
 
-    const table = display.createTable({
-      head: ['ID', 'Name', 'Provider', 'Category'],
-    });
-
+    const defaultModel = getDefaultModel();
+    
+    console.log();
+    console.log(chalk.bold('  Available AI Models:'));
+    console.log(chalk.dim('  ' + '─'.repeat(70)));
+    
     for (const model of modelList) {
-      const isDefault = model.id === getDefaultModel();
-      const idDisplay = isDefault
-        ? chalk.green(model.id + ' ✓')
-        : model.id;
-
-      table.push([
-        idDisplay,
-        model.name,
-        model.provider,
-        model.category || '-',
-      ]);
+      if (!model) continue;
+      
+      const modelAny = model as Record<string, unknown>;
+      const id = String(modelAny.id || modelAny._id || 'unknown');
+      const name = String(modelAny.name || id);
+      const provider = String(modelAny.provider || '-');
+      const isDefault = id === defaultModel;
+      
+      if (isDefault) {
+        console.log(chalk.green(`  ✓ ${id.padEnd(35)} ${name.padEnd(25)} ${provider}`));
+      } else {
+        console.log(`    ${id.padEnd(35)} ${name.padEnd(25)} ${chalk.dim(provider)}`);
+      }
     }
 
-    console.log(table.toString());
     display.newline();
     display.info(
       `Use ${chalk.cyan('cosmic config set defaultModel <model-id>')} to set default model`
@@ -324,25 +356,25 @@ async function models(): Promise<void> {
  */
 async function keys(action?: string): Promise<void> {
   const currentKeys = getBucketKeys();
-  
+
   if (!action || action === 'show') {
     // Show current keys
     display.header('Bucket API Keys');
     display.keyValue('Bucket', currentKeys.bucketSlug || chalk.dim('(not set)'));
-    display.keyValue('Read Key', currentKeys.readKey 
+    display.keyValue('Read Key', currentKeys.readKey
       ? chalk.dim(currentKeys.readKey.substring(0, 8) + '...')
       : chalk.dim('(not set)'));
-    display.keyValue('Write Key', currentKeys.writeKey 
+    display.keyValue('Write Key', currentKeys.writeKey
       ? chalk.dim(currentKeys.writeKey.substring(0, 8) + '...')
       : chalk.dim('(not set)'));
-    
+
     if (!currentKeys.writeKey) {
       display.newline();
       display.info(`Use ${chalk.cyan('cosmic keys set')} to configure bucket keys for AI features.`);
     }
     return;
   }
-  
+
   if (action === 'set') {
     // Prompt for bucket keys
     const bucketSlug = await prompts.text({
@@ -350,34 +382,34 @@ async function keys(action?: string): Promise<void> {
       initial: currentKeys.bucketSlug || getCurrentBucketSlug() || '',
       required: true,
     });
-    
+
     const readKey = await prompts.text({
       message: 'Read key:',
       initial: currentKeys.readKey || '',
       required: true,
     });
-    
+
     const writeKey = await prompts.text({
       message: 'Write key:',
       initial: currentKeys.writeKey || '',
       required: true,
     });
-    
+
     // Store the keys
     setCredentials({
       bucketSlug,
       readKey,
       writeKey,
     });
-    
+
     // Clear SDK client cache so it uses new keys
     clearSDKClient();
-    
+
     display.success('Bucket keys saved successfully!');
     display.info(`AI features will now use the ${chalk.cyan(bucketSlug)} bucket.`);
     return;
   }
-  
+
   if (action === 'clear') {
     setCredentials({
       bucketSlug: undefined,
@@ -388,7 +420,7 @@ async function keys(action?: string): Promise<void> {
     display.success('Bucket keys cleared.');
     return;
   }
-  
+
   display.error(`Unknown action: ${action}. Use 'show', 'set', or 'clear'.`);
 }
 

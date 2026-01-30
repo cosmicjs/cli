@@ -136,10 +136,29 @@ export function isAuthenticated(): boolean {
 }
 
 /**
- * Get the API base URL
+ * Get the Dashboard API base URL
+ * Priority: COSMIC_DAPI_URL env var > COSMIC_API_ENV env var > config apiUrl > default production URL
  */
 export function getApiUrl(): string {
-  return getConfigValue('apiUrl') || 'https://dapi.cosmicjs.com/v3';
+  // Check explicit DAPI URL env var first (highest priority)
+  if (process.env.COSMIC_DAPI_URL) {
+    return process.env.COSMIC_DAPI_URL;
+  }
+  
+  // Check API environment env var (overrides stored config)
+  const apiEnv = process.env.COSMIC_API_ENV?.toLowerCase();
+  if (apiEnv === 'staging') {
+    return 'https://dapi.cosmic-staging.com/v3';
+  }
+  
+  // Check stored config
+  const configUrl = getConfigValue('apiUrl');
+  if (configUrl) {
+    return configUrl;
+  }
+  
+  // Default to production
+  return 'https://dapi.cosmicjs.com/v3';
 }
 
 /**

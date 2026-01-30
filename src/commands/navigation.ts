@@ -9,12 +9,12 @@ import {
   getCurrentWorkspaceId,
   getCurrentProjectId,
   getCurrentProjectSlug,
-  getCurrentBucketSlug,
   setConfigValue,
   clearConfigValue,
   getConfigValue,
   setCredentials,
   clearCredentials,
+  getCredentials,
 } from '../config/store.js';
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
@@ -36,7 +36,7 @@ async function storeBucketKeys(bucketSlug: string): Promise<void> {
     const bucket = await api.getBucket(bucketSlug);
     const bucketAny = bucket as Record<string, unknown>;
     const apiAccess = bucketAny.api_access as Record<string, string> | undefined;
-    
+
     if (apiAccess && apiAccess.read_key && apiAccess.write_key) {
       setCredentials({
         bucketSlug,
@@ -60,7 +60,7 @@ async function storeBucketKeys(bucketSlug: string): Promise<void> {
 function getCurrentPath(): string {
   const projectId = getCurrentProjectId();
   const projectSlug = getCurrentProjectSlug();
-  const bucketSlug = getCurrentBucketSlug();
+  const bucketSlug = getConfigValue('currentBucket'); // Don't use credential fallback
   const objectType = getCurrentObjectType();
 
   if (!projectId && !projectSlug) {
@@ -93,12 +93,12 @@ function pwd(): void {
  */
 async function ls(path?: string): Promise<void> {
   const currentProjectId = getCurrentProjectId();
-  const currentBucketSlug = getCurrentBucketSlug();
+  const currentBucketSlug = getConfigValue('currentBucket'); // Don't use credential fallback
   const currentObjectType = getCurrentObjectType();
 
   // Determine what to list based on path argument or current context
   let targetPath = path;
-  
+
   if (!targetPath) {
     // Use current context
     if (currentObjectType && currentBucketSlug && currentProjectId) {
@@ -158,7 +158,7 @@ async function listProjects(): Promise<void> {
       const id = String(projAny.id || projAny._id || '-');
       const title = String(projAny.title || '-');
       const buckets = projAny.total_buckets || 0;
-      
+
       console.log(`    📁  ${chalk.cyan(id.padEnd(26))} ${title.padEnd(25)} ${chalk.dim(`${buckets} bucket${Number(buckets) !== 1 ? 's' : ''}`)}`);
     }
     console.log();
@@ -196,7 +196,7 @@ async function listBuckets(projectId: string): Promise<void> {
       const slug = String(bucket.slug || bucket.id || '-');
       const title = String(bucket.title || '-');
       const objects = bucket.total_objects || 0;
-      
+
       console.log(`    📦  ${chalk.cyan(slug)}`);
       console.log(`        ${title} ${chalk.dim(`(${objects} object${Number(objects) !== 1 ? 's' : ''})`)}`);
       console.log();
@@ -216,7 +216,7 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
     spinner.start('Loading...');
     const bucket = await api.getBucket(bucketSlug);
     spinner.stop();
-    
+
     const bucketAny = bucket as Record<string, unknown>;
     const objectTypes = (bucketAny.object_types || []) as Array<Record<string, unknown>>;
 
@@ -235,7 +235,7 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
       const title = String(objType.title || objType.singular || '-');
       const count = objType.total_objects || 0;
       const emoji = (objType.emoji as string) || '📄';
-      
+
       console.log(`    ${emoji}  ${chalk.cyan(slug.padEnd(18))} ${title.padEnd(20)} ${chalk.dim(`${count} object${Number(count) !== 1 ? 's' : ''}`)}`);
     }
     console.log();
@@ -271,15 +271,15 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
       const objAny = obj as Record<string, unknown>;
       // Data might be nested inside 'object' property
       const data = (objAny.object || objAny) as Record<string, unknown>;
-      
+
       const title = String(data.title || '-');
       const slug = String(data.slug || data.id || '-');
       const status = String(objAny.main_object_status || data.status || 'draft');
-      
+
       const icon = status === 'published' ? chalk.green('●') : chalk.yellow('○');
       console.log(`    ${icon}  ${chalk.cyan(display.truncate(slug, 28).padEnd(28))} ${title}`);
     }
-    
+
     if (result.total > objects.length) {
       console.log();
       console.log(chalk.dim(`    ... and ${result.total - objects.length} more`));
@@ -309,7 +309,7 @@ async function cd(path?: string): Promise<void> {
   // ".." - go up one level
   if (path === '..') {
     const currentObjectType = getCurrentObjectType();
-    const currentBucket = getCurrentBucketSlug();
+    const currentBucket = getConfigValue('currentBucket'); // Don't use credential fallback
     const currentProject = getCurrentProjectId();
 
     if (currentObjectType) {
@@ -334,7 +334,7 @@ async function cd(path?: string): Promise<void> {
   // Absolute path (starts with /)
   if (path.startsWith('/')) {
     const parts = path.split('/').filter(Boolean);
-    
+
     if (parts.length === 0) {
       clearConfigValue('currentProject');
       clearConfigValue('currentProjectId');
@@ -360,12 +360,12 @@ async function cd(path?: string): Promise<void> {
         const bucketSlug = parts[1];
         const buckets = projAny.buckets as Array<Record<string, unknown>> || [];
         const bucket = buckets.find(b => b.slug === bucketSlug);
-        
+
         if (!bucket) {
           display.error(`Bucket "${bucketSlug}" not found`);
           process.exit(1);
         }
-        
+
         setConfigValue('currentBucket', bucketSlug);
         // Store bucket keys for SDK
         await storeBucketKeys(bucketSlug);
@@ -376,12 +376,12 @@ async function cd(path?: string): Promise<void> {
           const bucketData = await api.getBucket(bucketSlug);
           const objectTypes = ((bucketData as Record<string, unknown>).object_types || []) as Array<Record<string, unknown>>;
           const objType = objectTypes.find(t => t.slug === typeSlug);
-          
+
           if (!objType) {
             display.error(`Object type "${typeSlug}" not found`);
             process.exit(1);
           }
-          
+
           setConfigValue('currentObjectType', typeSlug);
           console.log(chalk.dim(`/${projectId}/${bucketSlug}/${typeSlug}`));
         } else {
@@ -401,7 +401,7 @@ async function cd(path?: string): Promise<void> {
 
   // Relative path - depends on current context
   const currentProjectId = getCurrentProjectId();
-  const currentBucket = getCurrentBucketSlug();
+  const currentBucket = getConfigValue('currentBucket'); // Don't use credential fallback
   const currentObjectType = getCurrentObjectType();
 
   if (!currentProjectId) {
@@ -432,12 +432,12 @@ async function cd(path?: string): Promise<void> {
       const projAny = project as Record<string, unknown>;
       const buckets = projAny.buckets as Array<Record<string, unknown>> || [];
       const bucket = buckets.find(b => b.slug === path);
-      
+
       if (!bucket) {
         display.error(`Bucket "${path}" not found`);
         process.exit(1);
       }
-      
+
       setConfigValue('currentBucket', path);
       clearConfigValue('currentObjectType');
       // Store bucket keys for SDK
@@ -458,12 +458,12 @@ async function cd(path?: string): Promise<void> {
       const bucketAny = bucket as Record<string, unknown>;
       const objectTypes = (bucketAny.object_types || []) as Array<Record<string, unknown>>;
       const objType = objectTypes.find(t => t.slug === path);
-      
+
       if (!objType) {
         display.error(`Object type "${path}" not found`);
         process.exit(1);
       }
-      
+
       setConfigValue('currentObjectType', path);
       console.log(chalk.dim(`/${currentProjectId}/${currentBucket}/${path}`));
     } catch (error) {

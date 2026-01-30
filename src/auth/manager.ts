@@ -32,7 +32,7 @@ export async function authenticateWithPassword(
     'Origin': 'https://app.cosmicjs.com',
     'User-Agent': 'CosmicCLI/1.0.0',
   };
-  
+
   // Add OTP header if provided (for 2FA)
   if (otp) {
     headers['x-cosmic-otp'] = otp;

@@ -4,20 +4,35 @@
  */
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
-import { getApiUrl, getCurrentBucketSlug } from '../config/store.js';
+import { getApiUrl } from '../config/store.js';
 import { getAuthHeaders, getReadQueryParams } from '../auth/manager.js';
 import type { APIResponse } from '../types.js';
 
 // Create axios instance
 let client: AxiosInstance | null = null;
+let currentBaseUrl: string | null = null;
+
+/**
+ * Check if debug mode is enabled
+ */
+function isDebug(): boolean {
+  return process.env.COSMIC_DEBUG === '1' || process.env.COSMIC_DEBUG === '2';
+}
 
 /**
  * Get or create the API client
  */
 function getClient(): AxiosInstance {
-  if (!client) {
+  const apiUrl = getApiUrl();
+  
+  // Recreate client if URL changed
+  if (!client || currentBaseUrl !== apiUrl) {
+    if (isDebug()) {
+      console.log(`[DEBUG] Creating DAPI client with baseURL: ${apiUrl}`);
+    }
+    
     client = axios.create({
-      baseURL: getApiUrl(),
+      baseURL: apiUrl,
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
@@ -26,18 +41,33 @@ function getClient(): AxiosInstance {
         'User-Agent': 'CosmicCLI/1.0.0',
       },
     });
+    currentBaseUrl = apiUrl;
 
-    // Request interceptor to add auth headers
+    // Request interceptor to add auth headers and debug logging
     client.interceptors.request.use((config) => {
       const authHeaders = getAuthHeaders();
       Object.assign(config.headers, authHeaders);
+      
+      if (isDebug()) {
+        console.log(`[DEBUG] DAPI Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
+      }
+      
       return config;
     });
 
     // Response interceptor for error handling
     client.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        if (isDebug()) {
+          console.log(`[DEBUG] DAPI Response: ${response.status} ${response.statusText}`);
+        }
+        return response;
+      },
       (error: AxiosError) => {
+        if (isDebug()) {
+          console.log(`[DEBUG] DAPI Error: ${error.response?.status} ${error.response?.statusText}`);
+          console.log(`[DEBUG] DAPI Error data: ${JSON.stringify(error.response?.data)}`);
+        }
         if (error.response) {
           const data = error.response.data as Record<string, unknown>;
           const message = (data?.message as string) || (data?.error as string) || error.message;
@@ -59,14 +89,11 @@ export function resetClient(): void {
 }
 
 /**
- * Add bucket slug to URL params if needed
+ * Add bucket slug to URL params
  */
-function addBucketParam(url: string, bucketSlug?: string): string {
-  const slug = bucketSlug || getCurrentBucketSlug();
-  if (!slug) return url;
-
+function addBucketParam(url: string, bucketSlug: string): string {
   const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}slug=${slug}`;
+  return `${url}${separator}slug=${bucketSlug}`;
 }
 
 /**
@@ -94,7 +121,8 @@ export async function get<T = unknown>(
 ): Promise<T> {
   let endpoint = url;
 
-  if (options.bucketSlug !== undefined || getCurrentBucketSlug()) {
+  // Only add bucket slug if explicitly provided in options
+  if (options.bucketSlug) {
     endpoint = addBucketParam(endpoint, options.bucketSlug);
   }
 
@@ -124,7 +152,8 @@ export async function post<T = unknown>(
 ): Promise<T> {
   let endpoint = url;
 
-  if (options.bucketSlug !== undefined || getCurrentBucketSlug()) {
+  // Only add bucket slug if explicitly provided in options
+  if (options.bucketSlug) {
     endpoint = addBucketParam(endpoint, options.bucketSlug);
   }
 

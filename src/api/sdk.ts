@@ -4,7 +4,7 @@
  */
 
 import { createBucketClient } from '@cosmicjs/sdk';
-import { getCredentialValue, setCredentials } from '../config/store.js';
+import { getCredentialValue, setCredentials, getConfigValue } from '../config/store.js';
 
 // Type for the SDK client
 type BucketClient = ReturnType<typeof createBucketClient>;
@@ -12,9 +12,24 @@ type BucketClient = ReturnType<typeof createBucketClient>;
 // Cached SDK client instance
 let sdkClient: BucketClient | null = null;
 let currentBucketSlug: string | null = null;
+let currentSdkUrl: string | null = null;
+
+/**
+ * Get the API environment (production or staging)
+ * Priority: COSMIC_API_ENV env var > default "production"
+ */
+function getApiEnvironment(): 'production' | 'staging' {
+  const env = process.env.COSMIC_API_ENV?.toLowerCase();
+  if (env === 'staging') {
+    return 'staging';
+  }
+  return 'production';
+}
 
 /**
  * Initialize or get the SDK client for a bucket
+ * Uses apiEnvironment to determine the API endpoint (production or staging)
+ * See: https://www.cosmicjs.com/docs/api/object-types
  */
 export function getSDKClient(bucketSlug?: string): BucketClient | null {
   const slug = bucketSlug || getCredentialValue('bucketSlug');
@@ -25,19 +40,31 @@ export function getSDKClient(bucketSlug?: string): BucketClient | null {
     return null;
   }
 
-  // Return cached client if same bucket
-  if (sdkClient && currentBucketSlug === slug) {
+  // Get API environment
+  const apiEnv = getApiEnvironment();
+
+  // Return cached client if same bucket and same environment
+  if (sdkClient && currentBucketSlug === slug && currentSdkUrl === apiEnv) {
     return sdkClient;
   }
 
-  // Create new client
-  sdkClient = createBucketClient({
+  // Build SDK config - uses apiEnvironment to determine endpoint
+  const sdkConfig: Parameters<typeof createBucketClient>[0] = {
     bucketSlug: slug,
     readKey: readKey || '',
     writeKey: writeKey || '',
-  });
+    apiEnvironment: apiEnv,
+  };
 
+  if (process.env.COSMIC_DEBUG === '1') {
+    console.log(`  [DEBUG] SDK using apiEnvironment: ${apiEnv}`);
+  }
+
+  // Create new client
+  sdkClient = createBucketClient(sdkConfig);
   currentBucketSlug = slug;
+  currentSdkUrl = apiEnv;
+  
   return sdkClient;
 }
 
@@ -56,14 +83,21 @@ export function initSDKClient(
     writeKey,
   });
 
-  // Create and cache client
-  sdkClient = createBucketClient({
+  const apiEnv = getApiEnvironment();
+
+  // Build SDK config - uses apiEnvironment to determine endpoint
+  const sdkConfig: Parameters<typeof createBucketClient>[0] = {
     bucketSlug,
     readKey,
     writeKey,
-  });
+    apiEnvironment: apiEnv,
+  };
 
+  // Create and cache client
+  sdkClient = createBucketClient(sdkConfig);
   currentBucketSlug = bucketSlug;
+  currentSdkUrl = apiEnv;
+  
   return sdkClient;
 }
 
@@ -82,6 +116,7 @@ export function hasSDKClient(): boolean {
 export function clearSDKClient(): void {
   sdkClient = null;
   currentBucketSlug = null;
+  currentSdkUrl = null;
 }
 
 /**
@@ -99,10 +134,18 @@ export function getBucketKeys(): {
   };
 }
 
+/**
+ * Get the current API environment being used
+ */
+export function getApiEnv(): 'production' | 'staging' {
+  return getApiEnvironment();
+}
+
 export default {
   getSDKClient,
   initSDKClient,
   hasSDKClient,
   clearSDKClient,
   getBucketKeys,
+  getApiEnv,
 };

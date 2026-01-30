@@ -1,0 +1,200 @@
+# Cosmic SDK API Reference
+
+This CLI uses the Cosmic SDK (`@cosmicjs/sdk`). Always refer to this documentation when implementing features.
+
+**Documentation Source**: https://www.cosmicjs.com/docs/api
+
+## SDK Setup
+
+```typescript
+import { createBucketClient } from '@cosmicjs/sdk'
+
+const cosmic = createBucketClient({
+  bucketSlug: 'BUCKET_SLUG',
+  readKey: 'BUCKET_READ_KEY',
+  writeKey: 'BUCKET_WRITE_KEY',
+  apiEnvironment: 'production' // or 'staging'
+})
+```
+
+## Objects API
+
+### Create Object - `sdk.objects.insertOne()`
+
+**Required parameters:**
+- `title` (string): Object title
+- `type` (string): Object type SLUG (e.g., "blog-posts")
+
+**Optional parameters:**
+- `slug` (string): Auto-generated from title if not provided
+- `metadata` (object): Metafield key:value pairs
+
+```typescript
+await cosmic.objects.insertOne({
+  title: 'Blog Post Title',
+  type: 'blog-posts',
+  metadata: {
+    content: 'Post content here...',
+    author: 'author-object-id',
+    featured_image: 'image-name.jpg'
+  }
+})
+```
+
+### Get Objects - `sdk.objects.find()`
+
+```typescript
+await cosmic.objects.find({ type: 'blog-posts' })
+  .props('id,title,slug,metadata')
+  .limit(10)
+```
+
+### Update Object - `sdk.objects.updateOne()`
+
+```typescript
+await cosmic.objects.updateOne('object-id', {
+  title: 'New Title',
+  metadata: { featured: true }
+})
+```
+
+### Delete Object - `sdk.objects.deleteOne()`
+
+```typescript
+await cosmic.objects.deleteOne('object-id')
+```
+
+## Object Types API
+
+### Create Object Type - `sdk.objectTypes.insertOne()`
+
+**Required parameters:**
+- `title` (string): Display name
+
+**Optional parameters:**
+- `slug` (string): Auto-generated from title
+- `singular` (string): Singular form
+- `emoji` (string): Icon emoji
+- `metafields` (array): Field definitions
+
+```typescript
+await cosmic.objectTypes.insertOne({
+  title: 'Blog Posts',
+  slug: 'blog-posts',
+  singular: 'Blog Post',
+  emoji: '📝',
+  metafields: [
+    { title: 'Content', key: 'content', type: 'markdown' },
+    { title: 'Image', key: 'image', type: 'file', media_validation_type: 'image' }
+  ]
+})
+```
+
+### Get Object Types - `sdk.objectTypes.find()`
+
+```typescript
+await cosmic.objectTypes.find()
+```
+
+## Metafield Types
+
+Available types for metafields:
+- `text` - Single line text
+- `textarea` - Multi-line text
+- `html-textarea` - Rich HTML editor
+- `markdown` - Markdown editor
+- `number` - Numeric value
+- `date` - Date picker (format: "YYYY-MM-DD")
+- `file` - Single file/image
+- `files` - Multiple files
+- `object` - Single object relation
+- `objects` - Multiple object relations
+- `switch` - Boolean toggle
+- `select-dropdown` - Dropdown selection
+- `radio-buttons` - Radio button selection
+- `check-boxes` - Checkbox selection
+- `repeater` - Repeatable field group
+- `parent` - Nested field group
+- `json` - JSON data
+- `color` - Color picker
+- `emoji` - Emoji picker
+
+### Metafield Definition Example
+
+```typescript
+{
+  title: 'Featured Image',
+  key: 'featured_image',
+  type: 'file',
+  required: true,
+  media_validation_type: 'image'
+}
+```
+
+## Media API
+
+### Upload Media - `sdk.media.insertOne()`
+
+```typescript
+await cosmic.media.insertOne({
+  media: { originalname: 'image.jpg', buffer: fileBuffer },
+  folder: 'uploads',
+  alt_text: 'Image description',
+  metadata: { caption: 'Photo caption' }
+})
+```
+
+### Get Media - `sdk.media.find()`
+
+```typescript
+await cosmic.media.find({ folder: 'uploads' })
+  .props('url,imgix_url,alt_text')
+  .limit(20)
+```
+
+## AI API
+
+### Generate Text - `sdk.ai.generateText()`
+
+```typescript
+await cosmic.ai.generateText({
+  prompt: 'Write a product description',
+  model: 'claude-sonnet-4-5-20250929', // optional
+  max_tokens: 500
+})
+```
+
+### Generate Image - `sdk.ai.generateImage()`
+
+```typescript
+await cosmic.ai.generateImage({
+  prompt: 'A mountain landscape at sunset',
+  model: 'gemini-3-pro-image-preview',
+  size: '1024x1024',
+  folder: 'ai-generated',
+  alt_text: 'AI generated image'
+})
+```
+
+### Generate Video - `sdk.ai.generateVideo()`
+
+```typescript
+await cosmic.ai.generateVideo({
+  prompt: 'A calico kitten playing',
+  model: 'veo-3.1-fast-generate-preview',
+  duration: 8,
+  resolution: '720p'
+})
+```
+
+## Important Notes
+
+1. **SDK-First Principle**: Always use the SDK for operations available in the SDK. Only use DAPI for authentication, project management, and features not in the SDK.
+
+2. **Object Creation**: The `type` field is the object type SLUG, not the title. For "Blog Posts" type, use `type: "blog-posts"`.
+
+3. **Metadata**: When creating/updating objects, use `metadata` with metafield keys, not the metafield titles.
+
+4. **Media References**: In metadata, reference media by `name` property, not URL.
+
+5. **Object References**: In metadata, reference objects by their `id`.

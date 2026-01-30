@@ -50,7 +50,10 @@ export async function getWorkspace(workspaceId: string): Promise<Workspace> {
 // Projects
 // ============================================================================
 
-export async function listProjects(workspaceId?: string): Promise<Project[]> {
+export async function listProjects(
+  workspaceId?: string,
+  options?: { includeArchived?: boolean }
+): Promise<Project[]> {
   // Workspace ID must be passed as a header (optional - if not provided, returns default projects)
   const headers: Record<string, string> = {};
   if (workspaceId) {
@@ -59,7 +62,15 @@ export async function listProjects(workspaceId?: string): Promise<Project[]> {
   const response = await get<{ projects: Project[] }>('/projects/list', {
     headers,
   });
-  return response.projects || [];
+  
+  const projects = response.projects || [];
+  
+  // Filter out archived projects by default
+  if (!options?.includeArchived) {
+    return projects.filter((p: Record<string, unknown>) => !p.archived);
+  }
+  
+  return projects;
 }
 
 export async function getProject(projectId: string): Promise<Project> {
@@ -212,13 +223,18 @@ export async function unpublishObjects(
 }
 
 // ============================================================================
-// Object Types
+// Object Types - Use SDK per SDK-first principle
+// See: https://www.cosmicjs.com/docs/api/object-types
 // ============================================================================
 
+import { getSDKClient } from './sdk.js';
+
 export async function listObjectTypes(bucketSlug: string): Promise<ObjectType[]> {
-  const response = await get<{ object_types: ObjectType[] }>('/objectTypes/get', {
-    bucketSlug,
-  });
+  const sdk = getSDKClient(bucketSlug);
+  if (!sdk) {
+    throw new Error('SDK client not available');
+  }
+  const response = await sdk.objectTypes.find();
   return response.object_types || [];
 }
 
@@ -226,12 +242,35 @@ export async function getObjectType(
   bucketSlug: string,
   typeSlug: string
 ): Promise<ObjectType> {
-  const response = await get<{ object_type: ObjectType }>('/objectTypes/get', {
-    bucketSlug,
-    params: { slug: typeSlug },
-  });
+  const sdk = getSDKClient(bucketSlug);
+  if (!sdk) {
+    throw new Error('SDK client not available');
+  }
+  const response = await sdk.objectTypes.findOne(typeSlug);
   return response.object_type;
 }
+
+export interface CreateObjectTypeData {
+  title: string;
+  slug?: string;
+  singular?: string;
+  emoji?: string;
+  metafields?: Array<{
+    title: string;
+    key: string;
+    type: string;
+    required?: boolean;
+    options?: unknown;
+  }>;
+  options?: {
+    slug_field?: boolean;
+    content_editor?: boolean;
+  };
+  singleton?: boolean;
+}
+
+// Note: createObjectType is now handled via SDK in chat/repl.ts
+// Use sdk.objectTypes.insertOne() instead of DAPI
 
 // ============================================================================
 // Media
