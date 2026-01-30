@@ -7,6 +7,8 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import open from 'open';
 import {
+  verifyEmail as authVerifyEmail,
+  resendVerificationEmail as authResendVerification,
   authenticateWithPassword,
   authenticateWithBucketKeys,
   logout as authLogout,
@@ -20,6 +22,85 @@ import * as display from '../utils/display.js';
 import * as prompts from '../utils/prompts.js';
 import * as spinner from '../utils/spinner.js';
 
+const SIGNUP_URL = 'https://app.cosmicjs.com/signup';
+
+/**
+ * Signup command - opens browser to signup page
+ */
+async function signup(): Promise<void> {
+  // Check if already logged in
+  if (isAuthenticated()) {
+    const user = getCurrentUser();
+    if (user) {
+      display.info(`Already logged in as ${chalk.cyan(user.email)}`);
+      return;
+    }
+  }
+
+  display.info(`Opening ${chalk.cyan(SIGNUP_URL)} in your browser...`);
+  display.newline();
+  display.info(`After signing up, run ${chalk.cyan('cosmic login')} to authenticate.`);
+  
+  await open(SIGNUP_URL);
+}
+
+/**
+ * Verify email command
+ */
+async function verify(verificationCode?: string): Promise<void> {
+  // Get verification code if not provided
+  const code =
+    verificationCode ||
+    (await prompts.text({
+      message: 'Enter verification code from email:',
+      required: true,
+    }));
+
+  try {
+    spinner.start('Verifying email...');
+    const result = await authVerifyEmail(code);
+    spinner.succeed(`Email verified! Logged in as ${chalk.cyan(result.user.email)}`);
+
+    display.newline();
+    display.info(
+      `Run ${chalk.cyan('cosmic use <workspace>/<project>/<bucket>')} to set your working context.`
+    );
+  } catch (error) {
+    spinner.fail('Email verification failed');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Resend verification email command
+ */
+async function resendVerification(options: { email?: string }): Promise<void> {
+  // Get email if not provided
+  const email =
+    options.email ||
+    (await prompts.text({
+      message: 'Email:',
+      required: true,
+    }));
+
+  try {
+    spinner.start('Sending verification email...');
+    await authResendVerification(email);
+    spinner.succeed('Verification email sent!');
+
+    display.newline();
+    display.info(`Check your inbox at ${chalk.cyan(email)} for the verification link.`);
+    display.info(
+      `Run ${chalk.cyan('cosmic verify <verification-code>')} to verify your email.`
+    );
+  } catch (error) {
+    spinner.fail('Failed to send verification email');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
 /**
  * Login command
  */
@@ -31,6 +112,7 @@ async function login(options: { email?: string; password?: string }): Promise<vo
       display.warning(`Already logged in as ${user.email}`);
       const shouldLogout = await prompts.confirm({
         message: 'Do you want to log out and log in with a different account?',
+        initial: true,
       });
       if (!shouldLogout) {
         return;
@@ -169,6 +251,22 @@ function displayUserInfo(user: { email: string; first_name?: string; last_name?:
  * Create auth commands
  */
 export function createAuthCommands(program: Command): void {
+  program
+    .command('signup')
+    .description('Open browser to create a new Cosmic account')
+    .action(signup);
+
+  program
+    .command('verify [verificationCode]')
+    .description('Verify your email address with the code from your email')
+    .action(verify);
+
+  program
+    .command('resend-verification')
+    .description('Resend the email verification link')
+    .option('-e, --email <email>', 'Email address')
+    .action(resendVerification);
+
   program
     .command('login')
     .description('Authenticate with Cosmic')

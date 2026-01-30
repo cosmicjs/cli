@@ -18,8 +18,18 @@ import {
 } from '../config/store.js';
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
+import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
 import { clearSDKClient } from '../api/sdk.js';
+import { startChat } from '../chat/repl.js';
+
+// Quick start templates for AI-generated content
+const QUICK_START_TEMPLATES = [
+  { name: 'Blog', prompt: 'A blog with posts, authors, and categories' },
+  { name: 'E-commerce', prompt: 'An e-commerce store with products, categories, and reviews' },
+  { name: 'Portfolio', prompt: 'A developer portfolio with projects, skills, and work experience' },
+  { name: 'Company Site', prompt: 'A company website with services, team members, and testimonials' },
+];
 
 /**
  * Get current object type from config
@@ -478,6 +488,134 @@ async function cd(path?: string): Promise<void> {
 }
 
 /**
+ * Create a new project with interactive prompts
+ */
+async function createProject(): Promise<void> {
+  display.header('Create a New Project');
+
+  // Step 1: Get project title
+  const projectTitle = await prompts.text({
+    message: 'Project title:',
+    required: true,
+  });
+
+  // Step 2: Get project description (optional)
+  const description = await prompts.text({
+    message: 'Description (optional):',
+    required: false,
+  });
+
+  // Step 3: Choose how to start (default to AI)
+  const startMethod = await prompts.select<'scratch' | 'ai' | 'template'>({
+    message: 'How would you like to start?',
+    choices: [
+      { name: 'ai', message: 'Use AI to generate content model' },
+      { name: 'template', message: 'Use a quick start template' },
+      { name: 'scratch', message: 'Start from scratch' },
+    ],
+  });
+
+  let aiPrompt: string | undefined;
+
+  if (startMethod === 'template') {
+    // Show quick start templates
+    const templateChoice = await prompts.select<string>({
+      message: 'Choose a template:',
+      choices: QUICK_START_TEMPLATES.map(t => ({
+        name: t.name,
+        message: `${t.name} - "${t.prompt}"`,
+      })),
+    });
+
+    const template = QUICK_START_TEMPLATES.find(t => t.name === templateChoice);
+    aiPrompt = template?.prompt;
+  } else if (startMethod === 'ai') {
+    // Get custom AI prompt
+    aiPrompt = await prompts.text({
+      message: 'Describe your content model:',
+      required: true,
+    });
+  }
+
+  // Create the project
+  try {
+    spinner.start('Creating project...');
+
+    const workspaceId = getCurrentWorkspaceId();
+    const result = await api.createProject(
+      {
+        project_title: projectTitle,
+        bucket_title: 'Production',
+        description: description || undefined,
+        ai_prompt: aiPrompt,
+        plan_id: 'free',
+      },
+      workspaceId
+    );
+
+    spinner.succeed(`Project "${chalk.cyan(projectTitle)}" created!`);
+
+    // Extract project and bucket info from response
+    const projectAny = result.project as Record<string, unknown>;
+    const bucketAny = result.bucket as Record<string, unknown>;
+    const projectId = String(projectAny.id || projectAny._id);
+    const bucketSlug = String(bucketAny.slug);
+
+    display.newline();
+    display.keyValue('Project ID', projectId);
+    display.keyValue('Bucket', bucketSlug);
+
+    // Auto-set context to the new project/bucket
+    setConfigValue('currentProjectId', projectId);
+    setConfigValue('currentProject', projectTitle);
+    setConfigValue('currentBucket', bucketSlug);
+
+    // Store bucket keys if available
+    await storeBucketKeys(bucketSlug);
+
+    display.newline();
+    display.success(`Context set to ${chalk.cyan(`/${projectId}/${bucketSlug}`)}`);
+
+    // If AI prompt was used, offer to start chat
+    if (aiPrompt) {
+      display.newline();
+      const startAiChat = await prompts.confirm({
+        message: 'Start AI chat to build your content model?',
+        initial: true,
+      });
+
+      if (startAiChat) {
+        display.newline();
+        display.info('Starting AI chat to create your content model...');
+        display.newline();
+
+        // Start chat with a directive to use install_content_model action
+        const createPrompt = `Create a complete content model for: ${aiPrompt}
+
+Use the install_content_model action to create ALL object types AND demo content in one step. Include:
+1. All necessary object types with appropriate metafields
+2. 2-3 demo objects for each type with realistic content
+3. Unsplash image URLs for thumbnails and file metafields (use real URLs like https://images.unsplash.com/photo-...)
+
+Remember to create types that are referenced by others FIRST (e.g., categories and authors before blog posts).`;
+        await startChat({ initialPrompt: createPrompt });
+      } else {
+        display.newline();
+        display.info(`Run ${chalk.cyan('cosmic chat')} to start AI chat later.`);
+        display.info(`Your prompt: "${chalk.dim(aiPrompt)}"`);
+      }
+    } else {
+      display.newline();
+      display.info(`Run ${chalk.cyan('cosmic chat')} to use AI to build your content model.`);
+    }
+  } catch (error) {
+    spinner.fail('Failed to create project');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Create navigation commands
  */
 export function createNavigationCommands(program: Command): void {
@@ -496,5 +634,8 @@ export function createNavigationCommands(program: Command): void {
     .description('Change directory (navigate to project or bucket)')
     .action(cd);
 }
+
+// Export createProject for use by config.ts
+export { createProject };
 
 export default { createNavigationCommands };

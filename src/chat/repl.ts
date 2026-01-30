@@ -4,6 +4,7 @@
  */
 
 import * as readline from 'readline';
+import * as crypto from 'crypto';
 import chalk from 'chalk';
 import { isAuthenticated, getDefaultModel, getCurrentBucketSlug, setCredentials } from '../config/store.js';
 import { formatContext } from '../config/context.js';
@@ -27,6 +28,163 @@ import {
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 
+// Fallback images when Unsplash fails
+const FALLBACK_IMAGES = [
+  'https://imgix.cosmicjs.com/6bcb64d0-cd77-11ec-bb72-e143ea7952eb-placeholder-1.jpg',
+  'https://imgix.cosmicjs.com/6bcbba00-cd77-11ec-bb72-e143ea7952eb-placeholder-2.jpg',
+  'https://imgix.cosmicjs.com/6bcc0820-cd77-11ec-bb72-e143ea7952eb-placeholder-3.jpg',
+];
+
+/**
+ * Get a random fallback image
+ */
+function getRandomFallbackImage(): string {
+  return FALLBACK_IMAGES[Math.floor(Math.random() * FALLBACK_IMAGES.length)];
+}
+
+/**
+ * Generate a UUID for metafield IDs
+ */
+function generateUUID(): string {
+  return crypto.randomUUID();
+}
+
+/**
+ * Recursively add IDs to metafields
+ */
+function addIdsToMetafields(metafields: Record<string, unknown>[]): Record<string, unknown>[] {
+  return metafields.map((field) => {
+    const fieldWithId = {
+      ...field,
+      id: generateUUID(),
+    };
+
+    // Handle repeater fields with children
+    if (field.type === 'repeater' && Array.isArray(field.repeater_fields)) {
+      fieldWithId.repeater_fields = addIdsToMetafields(field.repeater_fields as Record<string, unknown>[]);
+    }
+
+    // Handle children (for nested fields)
+    if (Array.isArray(field.children)) {
+      fieldWithId.children = addIdsToMetafields(field.children as Record<string, unknown>[]);
+    }
+
+    return fieldWithId;
+  });
+}
+
+/**
+ * Upload an image from URL (Unsplash) to Cosmic media library
+ */
+async function uploadUnsplashImage(
+  imageUrl: string,
+  sdk: ReturnType<typeof getSDKClient>
+): Promise<string | null> {
+  if (!sdk) return null;
+
+  try {
+    // Fetch the image
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      console.log(chalk.dim(`  Failed to fetch image: ${imageUrl}`));
+      return null;
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Generate filename from URL
+    const urlObj = new URL(imageUrl);
+    const pathParts = urlObj.pathname.split('/');
+    const filenameBase = pathParts[pathParts.length - 1] || `image-${Date.now()}`;
+    const filename = `${filenameBase}-${Date.now()}.jpg`;
+
+    // Upload to Cosmic
+    const result = await sdk.media.insertOne({
+      media: buffer,
+      filename,
+      contentType: 'image/jpeg',
+    });
+
+    const mediaResult = result as { media?: { name?: string } };
+    return mediaResult.media?.name || null;
+  } catch (error) {
+    console.log(chalk.dim(`  Error uploading image: ${(error as Error).message}`));
+    return null;
+  }
+}
+
+/**
+ * Process Unsplash URLs in an object's metadata and thumbnail
+ */
+async function processUnsplashUrls(
+  obj: Record<string, unknown>,
+  sdk: ReturnType<typeof getSDKClient>,
+  objectTypeMetafields: Record<string, unknown>[]
+): Promise<void> {
+  // Process thumbnail
+  if (typeof obj.thumbnail === 'string' && obj.thumbnail.includes('images.unsplash.com')) {
+    console.log(chalk.dim(`  Uploading thumbnail image...`));
+    const mediaName = await uploadUnsplashImage(obj.thumbnail, sdk);
+    if (mediaName) {
+      obj.thumbnail = mediaName;
+    } else {
+      // Use fallback
+      const fallback = getRandomFallbackImage();
+      obj.thumbnail = fallback.replace('https://imgix.cosmicjs.com/', '');
+    }
+  }
+
+  // Process metadata
+  if (obj.metadata && typeof obj.metadata === 'object') {
+    const metadata = obj.metadata as Record<string, unknown>;
+    
+    for (const [key, value] of Object.entries(metadata)) {
+      // Find the metafield definition to check type
+      const metafieldDef = objectTypeMetafields.find((m) => m.key === key);
+      
+      // Handle file type with Unsplash URL
+      if (
+        metafieldDef?.type === 'file' &&
+        typeof value === 'string' &&
+        value.includes('images.unsplash.com')
+      ) {
+        console.log(chalk.dim(`  Uploading ${key} image...`));
+        const mediaName = await uploadUnsplashImage(value, sdk);
+        if (mediaName) {
+          metadata[key] = mediaName;
+        } else {
+          const fallback = getRandomFallbackImage();
+          metadata[key] = fallback.replace('https://imgix.cosmicjs.com/', '');
+        }
+      }
+      
+      // Handle files type (array) with Unsplash URLs
+      if (
+        metafieldDef?.type === 'files' &&
+        Array.isArray(value)
+      ) {
+        const processedFiles: string[] = [];
+        for (const fileUrl of value) {
+          if (typeof fileUrl === 'string' && fileUrl.includes('images.unsplash.com')) {
+            console.log(chalk.dim(`  Uploading ${key} image...`));
+            const mediaName = await uploadUnsplashImage(fileUrl, sdk);
+            if (mediaName) {
+              processedFiles.push(mediaName);
+            } else {
+              const fallback = getRandomFallbackImage();
+              processedFiles.push(fallback.replace('https://imgix.cosmicjs.com/', ''));
+            }
+          } else {
+            processedFiles.push(fileUrl as string);
+          }
+        }
+        metadata[key] = processedFiles;
+      }
+    }
+  }
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -34,6 +192,7 @@ interface ChatMessage {
 
 interface ChatOptions {
   model?: string;
+  initialPrompt?: string;  // Pre-loaded prompt to start the conversation
 }
 
 // Conversation history
@@ -219,6 +378,25 @@ export async function startChat(options: ChatOptions): Promise<void> {
 
   // Main chat loop
   const runChatLoop = async () => {
+    // Handle initial prompt if provided (from project creation)
+    if (options.initialPrompt) {
+      console.log(chalk.cyan('> ') + chalk.dim(options.initialPrompt));
+      conversationHistory.push({
+        role: 'user',
+        content: options.initialPrompt,
+      });
+      try {
+        let shouldContinue = true;
+        while (shouldContinue) {
+          shouldContinue = await processMessage(model, rl, bucketSlug);
+        }
+        skipConfirmations = false;
+      } catch (error) {
+        skipConfirmations = false;
+        display.error((error as Error).message);
+      }
+    }
+
     while (true) {
       try {
         const line = await question(chalk.cyan('> '));
@@ -334,14 +512,50 @@ You can perform these actions by outputting JSON commands:
 - singular: string (singular form, like "Blog Post")
 - emoji: string (icon like "📝", "👤", "🏷️")
 - metafields: array of field definitions with {title, key, type, required}
-- Field types: text, textarea, html-textarea, markdown, number, date, file, object, objects, switch, select-dropdown, radio-buttons, repeater
+
+**METAFIELD TYPES:**
+- text: Single line text
+- textarea: Multi-line plain text
+- html-textarea: Rich text HTML editor
+- markdown: Markdown editor
+- number: Numeric value
+- date: Date picker
+- file: File/image upload (use media_validation_type for validation)
+- files: Multiple files upload (use media_validation_type for validation)
+- object: Reference to single object (requires object_type)
+- objects: Reference to multiple objects (requires object_type)
+- switch: Boolean toggle - DO NOT include "options" field, just use type: "switch"
+- select-dropdown: Dropdown select (requires options array like ["Option 1", "Option 2"])
+- radio-buttons: Radio buttons (requires options array)
+- repeater: Repeatable group of fields (requires repeater_fields array)
+
+**IMPORTANT METAFIELD RULES:**
+- For "switch" type: Do NOT include an "options" field. Just use {"title": "Featured", "key": "is_featured", "type": "switch"}
+- For "object" type: Include "object_type": "<slug>" to specify which object type to reference
+- For "objects" type: Include "object_type": "<slug>" for the referenced type
+- For "file" and "files" types: Include "media_validation_type" to restrict file types:
+  - "image" - Only allow image files (jpg, png, gif, webp, etc.)
+  - "video" - Only allow video files (mp4, webm, etc.)
+  - "audio" - Only allow audio files (mp3, wav, etc.)
+  - "application" - Only allow documents (pdf, doc, etc.)
 
 **EXAMPLE OBJECT TYPE:**
 {"action": "create_object_type", "title": "Authors", "slug": "authors", "singular": "Author", "emoji": "👤", "metafields": [
   {"title": "Name", "key": "name", "type": "text", "required": true},
   {"title": "Bio", "key": "bio", "type": "textarea"},
-  {"title": "Avatar", "key": "avatar", "type": "file"},
+  {"title": "Avatar", "key": "avatar", "type": "file", "media_validation_type": "image"},
   {"title": "Email", "key": "email", "type": "text"}
+]}
+
+**EXAMPLE BLOG POST WITH REFERENCES:**
+{"action": "create_object_type", "title": "Blog Posts", "slug": "blog-posts", "singular": "Blog Post", "emoji": "📝", "metafields": [
+  {"title": "Content", "key": "content", "type": "markdown", "required": true},
+  {"title": "Excerpt", "key": "excerpt", "type": "textarea"},
+  {"title": "Featured Image", "key": "featured_image", "type": "file", "media_validation_type": "image"},
+  {"title": "Author", "key": "author", "type": "object", "object_type": "authors"},
+  {"title": "Categories", "key": "categories", "type": "objects", "object_type": "categories"},
+  {"title": "Published Date", "key": "published_date", "type": "date"},
+  {"title": "Featured", "key": "is_featured", "type": "switch"}
 ]}
 
 **AGENTS:**
@@ -438,6 +652,45 @@ ACTION: {"action": "create", "type": "blog-posts", "title": "Getting Started wit
 
 **SINGLE ITEM CREATION:**
 For creating just ONE item, use the create action directly (no create_batch needed).
+
+**INSTALL CONTENT MODEL (for creating complete content models with demo content):**
+When asked to "create object types" or "create a content model" or similar, use install_content_model:
+ACTION: {"action": "install_content_model", "object_types": [...], "demo_objects": [...]}
+
+**install_content_model STRUCTURE:**
+- object_types: Array of object type definitions (same format as create_object_type but without "action" field)
+- demo_objects: Array of demo content objects to create
+
+**IMPORTANT FOR install_content_model:**
+- Create object types that reference other types LAST (e.g., posts that reference authors/categories)
+- For demo_objects, include Unsplash image URLs for thumbnails and file metafields
+- Use real Unsplash URLs like: https://images.unsplash.com/photo-1234567890
+- For object references in demo_objects, use the slug of the referenced object (e.g., "category": "technology")
+- Create 2-3 demo objects per object type
+
+**EXAMPLE install_content_model:**
+ACTION: {"action": "install_content_model", "object_types": [
+  {"title": "Categories", "slug": "categories", "singular": "Category", "emoji": "🏷️", "metafields": [
+    {"title": "Name", "key": "name", "type": "text", "required": true},
+    {"title": "Description", "key": "description", "type": "textarea"}
+  ]},
+  {"title": "Authors", "slug": "authors", "singular": "Author", "emoji": "👤", "metafields": [
+    {"title": "Name", "key": "name", "type": "text", "required": true},
+    {"title": "Bio", "key": "bio", "type": "textarea"},
+    {"title": "Avatar", "key": "avatar", "type": "file", "media_validation_type": "image"}
+  ]},
+  {"title": "Blog Posts", "slug": "blog-posts", "singular": "Blog Post", "emoji": "📝", "metafields": [
+    {"title": "Content", "key": "content", "type": "markdown", "required": true},
+    {"title": "Featured Image", "key": "featured_image", "type": "file", "media_validation_type": "image"},
+    {"title": "Author", "key": "author", "type": "object", "object_type": "authors"},
+    {"title": "Categories", "key": "categories", "type": "objects", "object_type": "categories"}
+  ]}
+], "demo_objects": [
+  {"title": "Technology", "type": "categories", "metadata": {"name": "Technology", "description": "Articles about tech"}},
+  {"title": "Web Development", "type": "categories", "metadata": {"name": "Web Development", "description": "Frontend and backend tutorials"}},
+  {"title": "Jane Smith", "type": "authors", "thumbnail": "https://images.unsplash.com/photo-1494790108377-be9c29b29330", "metadata": {"name": "Jane Smith", "bio": "Senior developer and tech writer", "avatar": "https://images.unsplash.com/photo-1494790108377-be9c29b29330"}},
+  {"title": "Getting Started with React", "type": "blog-posts", "thumbnail": "https://images.unsplash.com/photo-1633356122544-f134324a6cee", "metadata": {"content": "# Introduction\\n\\nReact is a popular JavaScript library...", "featured_image": "https://images.unsplash.com/photo-1633356122544-f134324a6cee", "author": "jane-smith", "categories": ["technology", "web-development"]}}
+]}
 
 **OTHER RULES:**
 - After each create completes, continue with the NEXT item automatically
@@ -1152,14 +1405,270 @@ async function executeAction(actionJson: string): Promise<string> {
         if (action.slug) objectTypeData.slug = action.slug;
         if (action.singular) objectTypeData.singular = action.singular;
         if (action.emoji) objectTypeData.emoji = action.emoji;
-        if (action.metafields) objectTypeData.metafields = action.metafields;
         if (action.singleton !== undefined) objectTypeData.singleton = action.singleton;
+        
+        // Sanitize metafields - fix common AI mistakes
+        if (action.metafields && Array.isArray(action.metafields)) {
+          objectTypeData.metafields = action.metafields.map((field: Record<string, unknown>) => {
+            const sanitized = { ...field };
+            // Switch type requires options as string "true,false" or "yes,no"
+            if (field.type === 'switch') {
+              sanitized.options = 'true,false';
+            }
+            return sanitized;
+          });
+        }
         
         const result = await sdkClient.objectTypes.insertOne(objectTypeData);
         spinner.stop();
 
         const typeAny = result.object_type as Record<string, unknown>;
         return `✓ Created object type "${typeAny.title}" with slug "${typeAny.slug}"`;
+      }
+
+      case 'install_content_model': {
+        const objectTypes = action.object_types as Record<string, unknown>[];
+        const demoObjects = action.demo_objects as Record<string, unknown>[];
+
+        if (!objectTypes || !Array.isArray(objectTypes) || objectTypes.length === 0) {
+          return 'Error: install_content_model requires object_types array.';
+        }
+
+        // Show confirmation with summary
+        console.log();
+        console.log(chalk.yellow(`  Install Content Model:`));
+        console.log(chalk.yellow(`    • ${objectTypes.length} object type(s)`));
+        if (demoObjects && demoObjects.length > 0) {
+          console.log(chalk.yellow(`    • ${demoObjects.length} demo object(s)`));
+        }
+        console.log();
+        
+        // List object types
+        for (const ot of objectTypes) {
+          const emoji = (ot.emoji as string) || '📄';
+          console.log(chalk.yellow(`    ${emoji} ${ot.title}`));
+        }
+        
+        console.log();
+        process.stdout.write(chalk.yellow(`  Proceed? `));
+        const confirmed = await askConfirmation();
+
+        if (!confirmed) {
+          return chalk.dim('Cancelled.');
+        }
+
+        const sdkClient = getSDKClient();
+        if (!sdkClient) {
+          return 'Error: SDK client not available.';
+        }
+
+        const results: string[] = [];
+        const createdObjectTypes: Map<string, Record<string, unknown>> = new Map();
+        // Track created objects: both expected slug (from AI) and actual slug -> id
+        const createdObjects: Map<string, string> = new Map(); // slug -> id mapping
+        // Track which demo objects were successfully created with their details
+        const successfulObjects: Array<{ original: Record<string, unknown>; created: Record<string, unknown> }> = [];
+
+        // Step 1: Create all object types first
+        console.log();
+        console.log(chalk.cyan('  Creating object types...'));
+        
+        for (const ot of objectTypes) {
+          spinner.start(`Creating ${ot.title}...`);
+          
+          try {
+            const objectTypeData: Record<string, unknown> = {
+              title: ot.title,
+            };
+            
+            if (ot.slug) objectTypeData.slug = ot.slug;
+            if (ot.singular) objectTypeData.singular = ot.singular;
+            if (ot.emoji) objectTypeData.emoji = ot.emoji;
+            
+            // Add IDs to metafields and sanitize
+            if (ot.metafields && Array.isArray(ot.metafields)) {
+              const metafieldsWithIds = addIdsToMetafields(ot.metafields as Record<string, unknown>[]);
+              objectTypeData.metafields = metafieldsWithIds.map((field: Record<string, unknown>) => {
+                const sanitized = { ...field };
+                // Switch type requires options as string "true,false" or "yes,no"
+                if (field.type === 'switch') {
+                  sanitized.options = 'true,false';
+                }
+                return sanitized;
+              });
+            }
+            
+            const result = await sdkClient.objectTypes.insertOne(objectTypeData);
+            spinner.stop();
+            
+            const typeAny = result.object_type as Record<string, unknown>;
+            const slug = typeAny.slug as string;
+            createdObjectTypes.set(slug, typeAny);
+            
+            const emoji = (ot.emoji as string) || '✓';
+            console.log(chalk.green(`  ${emoji} Created "${typeAny.title}" (${slug})`));
+            results.push(`Created object type: ${typeAny.title}`);
+          } catch (error) {
+            spinner.stop();
+            console.log(chalk.red(`  ✗ Failed to create "${ot.title}": ${(error as Error).message}`));
+            results.push(`Failed: ${ot.title} - ${(error as Error).message}`);
+          }
+        }
+
+        // Step 2: Create demo objects if provided
+        if (demoObjects && demoObjects.length > 0) {
+          console.log();
+          console.log(chalk.cyan('  Creating demo content...'));
+          
+          // Sort demo objects: create objects without references first
+          // (categories, authors before posts that reference them)
+          const sortedDemoObjects = [...demoObjects].sort((a, b) => {
+            const aType = createdObjectTypes.get(a.type as string);
+            const bType = createdObjectTypes.get(b.type as string);
+            
+            // Count object/objects references in metafields
+            const countRefs = (ot: Record<string, unknown> | undefined) => {
+              if (!ot?.metafields) return 0;
+              return (ot.metafields as Record<string, unknown>[]).filter(
+                (m) => m.type === 'object' || m.type === 'objects'
+              ).length;
+            };
+            
+            return countRefs(aType) - countRefs(bType);
+          });
+
+          for (const obj of sortedDemoObjects) {
+            const typeSlug = obj.type as string;
+            const objectType = createdObjectTypes.get(typeSlug);
+            
+            if (!objectType) {
+              console.log(chalk.yellow(`  ⚠ Skipping "${obj.title}" - object type "${typeSlug}" not found`));
+              continue;
+            }
+            
+            spinner.start(`Creating "${obj.title}"...`);
+            
+            try {
+              // Process Unsplash URLs in thumbnail and metadata
+              const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
+              await processUnsplashUrls(obj, sdkClient, metafields);
+              
+              // Build the object data
+              const insertPayload: Record<string, unknown> = {
+                type: typeSlug,
+                title: obj.title,
+              };
+              
+              if (obj.slug) insertPayload.slug = obj.slug;
+              if (obj.thumbnail) insertPayload.thumbnail = obj.thumbnail;
+              
+              // Process metadata - resolve object references
+              if (obj.metadata && typeof obj.metadata === 'object') {
+                const metadata = { ...(obj.metadata as Record<string, unknown>) };
+                
+                // For now, we'll just use the metadata as-is
+                // Object references will be resolved by slug after all objects are created
+                insertPayload.metadata = metadata;
+              }
+              
+              const result = await sdkClient.objects.insertOne(insertPayload);
+              spinner.stop();
+              
+              const createdObj = result.object as Record<string, unknown>;
+              const actualSlug = createdObj.slug as string;
+              const id = createdObj.id as string;
+              
+              // Store for reference resolution - map multiple possible slugs to the ID
+              createdObjects.set(actualSlug, id);
+              
+              // Also map the expected slug (from AI) if different
+              const expectedSlug = obj.slug as string;
+              if (expectedSlug && expectedSlug !== actualSlug) {
+                createdObjects.set(expectedSlug, id);
+              }
+              
+              // Also map a slugified version of the title
+              const titleSlug = (obj.title as string).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+              if (titleSlug && titleSlug !== actualSlug) {
+                createdObjects.set(titleSlug, id);
+              }
+              
+              // Track for reference resolution
+              successfulObjects.push({ original: obj, created: createdObj });
+              
+              console.log(chalk.green(`  ✓ Created "${createdObj.title}" (${typeSlug})`));
+              results.push(`Created object: ${createdObj.title}`);
+            } catch (error) {
+              spinner.stop();
+              console.log(chalk.red(`  ✗ Failed to create "${obj.title}": ${(error as Error).message}`));
+              results.push(`Failed: ${obj.title} - ${(error as Error).message}`);
+            }
+          }
+
+          // Step 3: Resolve object references (update objects with proper IDs)
+          if (successfulObjects.length > 0) {
+            console.log();
+            console.log(chalk.cyan('  Resolving references...'));
+            
+            for (const { original, created } of successfulObjects) {
+              const typeSlug = original.type as string;
+              const objectType = createdObjectTypes.get(typeSlug);
+              
+              if (!objectType || !original.metadata) continue;
+              
+              const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
+              const refMetafields = metafields.filter(
+                (m) => m.type === 'object' || m.type === 'objects'
+              );
+              
+              if (refMetafields.length === 0) continue;
+              
+              const metadata = original.metadata as Record<string, unknown>;
+              const updates: Record<string, unknown> = {};
+              let hasUpdates = false;
+              
+              for (const metafield of refMetafields) {
+                const key = metafield.key as string;
+                const value = metadata[key];
+                
+                if (!value) continue;
+                
+                if (metafield.type === 'object' && typeof value === 'string') {
+                  // Single object reference - convert slug to ID
+                  const refId = createdObjects.get(value);
+                  if (refId) {
+                    updates[key] = refId;
+                    hasUpdates = true;
+                  }
+                } else if (metafield.type === 'objects' && Array.isArray(value)) {
+                  // Multiple object references - convert slugs to IDs
+                  const refIds = value
+                    .map((slug: string) => createdObjects.get(slug))
+                    .filter(Boolean);
+                  if (refIds.length > 0) {
+                    updates[key] = refIds;
+                    hasUpdates = true;
+                  }
+                }
+              }
+              
+              if (hasUpdates) {
+                const objId = created.id as string;
+                const objTitle = created.title as string;
+                
+                try {
+                  await sdkClient.objects.updateOne(objId, { metadata: updates });
+                  console.log(chalk.dim(`  ✓ Updated references for "${objTitle}"`));
+                } catch (error) {
+                  console.log(chalk.yellow(`  ⚠ Could not update references for "${objTitle}"`));
+                }
+              }
+            }
+          }
+        }
+
+        console.log();
+        return `✓ Content model installed: ${objectTypes.length} object type(s)${demoObjects ? `, ${demoObjects.length} demo object(s)` : ''}`;
       }
 
       default:

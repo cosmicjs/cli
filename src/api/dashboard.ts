@@ -80,6 +80,32 @@ export async function getProject(projectId: string): Promise<Project> {
   return response.project;
 }
 
+export interface CreateProjectData {
+  project_title: string;
+  bucket_title: string;
+  description?: string;
+  workspace?: string;
+  ai_prompt?: string;    // For AI-generated content model
+  plan_id?: string;      // Default: 'free'
+}
+
+export async function createProject(
+  data: CreateProjectData,
+  workspaceId?: string
+): Promise<{ project: Project; bucket: Bucket }> {
+  const headers: Record<string, string> = {};
+  if (workspaceId) {
+    headers.workspace = workspaceId;
+  }
+  
+  const response = await post<{ project: Project; bucket: Bucket }>(
+    '/projects/addProjectWithBucket',
+    data,
+    { config: { headers } }
+  );
+  return response;
+}
+
 // ============================================================================
 // Buckets
 // ============================================================================

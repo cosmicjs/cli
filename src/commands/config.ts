@@ -26,6 +26,7 @@ import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
 import { clearSDKClient, getBucketKeys, getApiEnv } from '../api/sdk.js';
+import { createProject } from './navigation.js';
 
 /**
  * Look up workspace ID from slug
@@ -449,13 +450,26 @@ export function createConfigCommands(program: Command): void {
     .description('List workspaces')
     .action(workspaces);
 
-  program
+  // Projects command with subcommands
+  const projectsCmd = program
     .command('projects')
     .alias('proj')
+    .description('Manage projects');
+
+  projectsCmd
+    .command('list')
     .description('List projects (in workspace or default)')
     .option('--workspace <id>', 'Workspace ID')
     .option('--default', 'List default projects (not in any workspace)')
     .action((options) => projects({ workspace: options.workspace, all: options.default }));
+
+  projectsCmd
+    .command('create')
+    .description('Create a new project')
+    .action(createProject);
+
+  // Default action for 'projects' without subcommand is to list
+  projectsCmd.action((options) => projects({ workspace: options.workspace, all: options.default }));
 
   program
     .command('models')

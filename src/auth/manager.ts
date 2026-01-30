@@ -15,8 +15,85 @@ import type { CosmicUser, CosmicCredentials } from '../types.js';
 // Token expiration buffer (refresh 5 minutes before expiry)
 const TOKEN_EXPIRY_BUFFER = 5 * 60 * 1000;
 
-// Dashboard API URL (different from public API)
-const DASHBOARD_API_URL = 'https://dapi.cosmicjs.com/v3';
+// Default Dashboard API URL (can be overridden by COSMIC_DAPI_URL env var)
+const DEFAULT_DASHBOARD_API_URL = 'https://dapi.cosmicjs.com/v3';
+
+/**
+ * Get the Dashboard API URL (respects COSMIC_DAPI_URL env var)
+ */
+function getDashboardApiUrl(): string {
+  return process.env.COSMIC_DAPI_URL || DEFAULT_DASHBOARD_API_URL;
+}
+
+// Common headers for Dashboard API requests
+const getCommonHeaders = (): Record<string, string> => ({
+  'Content-Type': 'application/json',
+  'Origin': 'https://app.cosmicjs.com',
+  'User-Agent': 'CosmicCLI/1.0.0',
+});
+
+/**
+ * Verify email with verification code
+ */
+export async function verifyEmail(
+  verificationCode: string
+): Promise<{ user: CosmicUser; accessToken: string }> {
+  const response = await fetch(`${getDashboardApiUrl()}/users/verifyEmail`, {
+    method: 'POST',
+    headers: getCommonHeaders(),
+    body: JSON.stringify({ verification_code: verificationCode }),
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    if (process.env.DEBUG) {
+      console.error('Verify email response status:', response.status);
+      console.error('Verify email response data:', JSON.stringify(data, null, 2));
+    }
+    const message = data?.message || data?.error || `Email verification failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  if (!data || !data.user || !data.token) {
+    throw new Error('Invalid verification response');
+  }
+
+  // Store credentials after successful verification
+  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  setCredentials({
+    accessToken: data.token,
+    expiresAt,
+    user: data.user,
+  });
+
+  return {
+    user: data.user,
+    accessToken: data.token,
+  };
+}
+
+/**
+ * Resend verification email
+ */
+export async function resendVerificationEmail(email: string): Promise<void> {
+  const response = await fetch(`${getDashboardApiUrl()}/users/resendVerificationEmail`, {
+    method: 'POST',
+    headers: getCommonHeaders(),
+    body: JSON.stringify({ email }),
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    if (process.env.DEBUG) {
+      console.error('Resend verification response status:', response.status);
+      console.error('Resend verification response data:', JSON.stringify(data, null, 2));
+    }
+    const message = data?.message || data?.error || `Failed to resend verification email (${response.status})`;
+    throw new Error(message);
+  }
+}
 
 /**
  * Authenticate with email and password
@@ -26,19 +103,14 @@ export async function authenticateWithPassword(
   password: string,
   otp?: string
 ): Promise<{ user: CosmicUser; accessToken: string; requires2FA?: boolean }> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    // Required: Dashboard API requires Origin header for CORS
-    'Origin': 'https://app.cosmicjs.com',
-    'User-Agent': 'CosmicCLI/1.0.0',
-  };
+  const headers: Record<string, string> = getCommonHeaders();
 
   // Add OTP header if provided (for 2FA)
   if (otp) {
     headers['x-cosmic-otp'] = otp;
   }
 
-  const response = await fetch(`${DASHBOARD_API_URL}/users/authenticate`, {
+  const response = await fetch(`${getDashboardApiUrl()}/users/authenticate`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ email, password }),
@@ -46,8 +118,8 @@ export async function authenticateWithPassword(
 
   const data = await response.json().catch(() => null);
 
-  // Check for 2FA requirement
-  if (response.status === 401 && data?.requires_2fa) {
+  // Check for 2FA requirement - API returns 206 with X-Cosmic-OTP header
+  if (response.status === 206) {
     return {
       user: {} as CosmicUser,
       accessToken: '',
@@ -175,7 +247,7 @@ export async function validateAuth(): Promise<boolean> {
 
   if (creds.accessToken) {
     try {
-      const response = await fetch(`${DASHBOARD_API_URL}/users/get`, {
+      const response = await fetch(`${getDashboardApiUrl()}/users/get`, {
         headers: {
           Authorization: `Bearer ${creds.accessToken}`,
           'Origin': 'https://app.cosmicjs.com',
@@ -237,6 +309,8 @@ export function getReadQueryParams(): Record<string, string> {
 }
 
 export default {
+  verifyEmail,
+  resendVerificationEmail,
   authenticateWithPassword,
   authenticateWithBucketKeys,
   getAccessToken,

@@ -1,3 +1,15 @@
 #!/usr/bin/env node
 
+// Load .env from the package root before anything else
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { config } from 'dotenv';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const envPath = join(__dirname, '..', '.env');
+
+// Load .env synchronously before importing the CLI
+config({ path: envPath });
+
 import('../dist/index.js').catch(console.error);
