@@ -71,6 +71,19 @@ async function tryFetchBucketKeys(bucketSlug: string): Promise<boolean> {
  * Start the interactive chat
  */
 export async function startChat(options: ChatOptions): Promise<void> {
+  // Add global error handlers for debugging
+  process.on('uncaughtException', (err) => {
+    console.error(chalk.red(`\n[CRASH] Uncaught exception: ${err.message}`));
+    console.error(chalk.dim(err.stack || ''));
+    process.exit(1);
+  });
+  
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error(chalk.red(`\n[CRASH] Unhandled rejection:`));
+    console.error(chalk.dim(String(reason)));
+    process.exit(1);
+  });
+
   // Check authentication
   if (!isAuthenticated()) {
     display.error('Not authenticated. Run `cosmic login` first.');
@@ -146,6 +159,24 @@ export async function startChat(options: ChatOptions): Promise<void> {
       pendingReject = null;
     }
   });
+  
+  // Listen for stdin end/close events
+  process.stdin.on('end', () => {
+    console.error(chalk.red('\n[DEBUG] stdin end event'));
+  });
+  
+  process.stdin.on('close', () => {
+    console.error(chalk.red('\n[DEBUG] stdin close event'));
+  });
+  
+  // Listen for process exit
+  process.on('exit', (code) => {
+    console.error(chalk.dim(`\n[DEBUG] Process exit with code: ${code}`));
+  });
+  
+  process.on('beforeExit', (code) => {
+    console.error(chalk.dim(`\n[DEBUG] Process beforeExit with code: ${code}`));
+  });
 
   // Handle SIGINT (Ctrl+C)
   process.on('SIGINT', () => {
@@ -157,7 +188,22 @@ export async function startChat(options: ChatOptions): Promise<void> {
   // Promisified question function
   const question = (prompt: string): Promise<string> => {
     return new Promise((resolve, reject) => {
-      // Ensure readline is actively reading
+      // Debug: Check stdin state
+      if (process.env.COSMIC_DEBUG === '1') {
+        console.log(chalk.dim(`\n[DEBUG] stdin readable: ${process.stdin.readable}, destroyed: ${process.stdin.destroyed}`));
+        console.log(chalk.dim(`[DEBUG] rl closed: ${(rl as any).closed}, terminal: ${(rl as any).terminal}`));
+      }
+      
+      // Check if stdin is still readable
+      if (!process.stdin.readable || process.stdin.destroyed) {
+        console.error(chalk.red('\n[ERROR] stdin is no longer readable'));
+        reject(new Error('stdin closed'));
+        return;
+      }
+      
+      // Ensure stdin is flowing and readline is actively reading
+      // This is critical to keep the event loop active
+      process.stdin.resume();
       rl.resume();
 
       pendingResolve = resolve;
@@ -220,12 +266,21 @@ export async function startChat(options: ChatOptions): Promise<void> {
           }
           // Reset skip confirmations after auto-continue loop ends
           skipConfirmations = false;
+          if (process.env.COSMIC_DEBUG === '1') {
+            console.log(chalk.dim('[DEBUG] processMessage complete, about to loop back for next input'));
+          }
         } catch (error) {
           skipConfirmations = false;
+          console.error(chalk.red(`[DEBUG] Inner catch error: ${(error as Error).message}`));
           display.error((error as Error).message);
         }
       } catch (error) {
         // Handle readline close (Ctrl+C, etc.)
+        const err = error as Error;
+        if (process.env.COSMIC_DEBUG === '1') {
+          console.error(chalk.red(`\n[DEBUG] Outer catch error: ${err.message}`));
+          console.error(chalk.dim(`Stack: ${err.stack}`));
+        }
         console.log(chalk.dim('\nGoodbye!'));
         process.exit(0);
       }
@@ -587,11 +642,13 @@ async function executeAction(actionJson: string): Promise<string> {
       case 'list': {
         spinner.start('Fetching...');
 
-        // SDK uses chaining: find(query).limit(n)
-        const query = action.type ? { type: action.type } : {};
+        // SDK uses chaining: find(query).status('any').limit(n)
+        const query: Record<string, unknown> = {};
+        if (action.type) query.type = action.type;
         const limit = action.limit || 10;
 
-        const result = await sdk.objects.find(query).limit(limit);
+        // Use .status('any') to fetch both published and draft objects
+        const result = await sdk.objects.find(query).status('any').limit(limit);
         spinner.stop();
 
         if (!result.objects || result.objects.length === 0) {
@@ -621,15 +678,16 @@ async function executeAction(actionJson: string): Promise<string> {
           // Check if it looks like a MongoDB ObjectID (24 hex chars)
           const isObjectId = /^[a-f0-9]{24}$/i.test(identifier);
 
+          // Use find().status('any').limit(1) for both ID and slug lookups
+          // because findOne doesn't support .status() chaining
           let result;
           if (isObjectId) {
-            result = await sdk.objects.findOne({ id: identifier });
+            const findResult = await sdk.objects.find({ id: identifier }).status('any').limit(1);
+            result = { object: findResult.objects?.[0] };
           } else {
             // Search by slug using find with slug filter
-            result = await sdk.objects.find({ slug: identifier }).limit(1);
-            if (result.objects && result.objects.length > 0) {
-              result = { object: result.objects[0] };
-            }
+            const findResult = await sdk.objects.find({ slug: identifier }).status('any').limit(1);
+            result = { object: findResult.objects?.[0] };
           }
 
           spinner.stop();
@@ -1204,7 +1262,7 @@ async function processMessage(
         console.log(chalk.yellow('  Options:'));
         console.log(chalk.dim('  1. Wait for your token quota to reset'));
         console.log(chalk.dim('  2. Use a less expensive model with: cosmic config set defaultModel <model>'));
-        console.log(chalk.dim('  3. Upgrade your plan at https://app.cosmicjs.com/billing'));
+        console.log(chalk.dim('  3. Upgrade your plan at https://app.cosmicjs.com/account/billing'));
         console.log();
 
         // Remove the failed message from history

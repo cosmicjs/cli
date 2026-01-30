@@ -137,11 +137,17 @@ export async function listObjects(
 
 export async function getObject(
   bucketSlug: string,
-  objectId: string
+  objectId: string,
+  options: { status?: 'published' | 'draft' | 'any' } = {}
 ): Promise<CosmicObject> {
+  const params: Record<string, unknown> = { id: objectId };
+  // Default to 'any' to include both published and draft objects
+  const queryObj: Record<string, unknown> = { status: options.status || 'any' };
+  params.query = JSON.stringify(queryObj);
+  
   const response = await get<{ object: CosmicObject }>('/objects/get', {
     bucketSlug,
-    params: { id: objectId },
+    params,
   });
   return response.object;
 }

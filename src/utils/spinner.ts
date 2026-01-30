@@ -19,6 +19,8 @@ export function start(message: string): Ora {
   currentSpinner = ora({
     text: message,
     spinner: 'dots',
+    // Don't discard stdin - this interferes with readline in interactive mode
+    discardStdin: false,
   }).start();
 
   return currentSpinner;

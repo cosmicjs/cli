@@ -93,7 +93,8 @@ async function handleListObjects(
 ): Promise<AIToolResult> {
   const { objects, total } = await api.listObjects(bucketSlug, {
     type: args.type as string,
-    status: args.status as 'published' | 'draft' | 'any',
+    // Default to 'any' to include both published and draft objects
+    status: (args.status as 'published' | 'draft' | 'any') || 'any',
     limit: (args.limit as number) || 10,
   });
 

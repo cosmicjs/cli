@@ -44,13 +44,13 @@ async function listObjects(options: {
   try {
     spinner.start('Loading objects...');
     
-    // Build query for SDK - SDK uses chaining: find(query).limit(n)
+    // Build query for SDK - SDK uses chaining: find(query).status('any').limit(n)
     const query: Record<string, unknown> = {};
     if (options.type) query.type = options.type;
-    if (options.status && options.status !== 'any') query.status = options.status;
     
     const limit = options.limit ? parseInt(options.limit, 10) : 10;
-    const result = await sdk.objects.find(query).limit(limit);
+    // Use .status('any') to fetch both published and draft objects
+    const result = await sdk.objects.find(query).status('any').limit(limit);
     
     const objects = result.objects || [];
     const total = result.total || objects.length;
@@ -109,8 +109,15 @@ async function getObject(
 
   try {
     spinner.start('Loading object...');
-    const result = await sdk.objects.findOne({ id: objectId });
-    const obj = result.object;
+    // Use find().status('any').limit(1) because findOne doesn't support .status() chaining
+    const findResult = await sdk.objects.find({ id: objectId }).status('any').limit(1);
+    const obj = findResult.objects?.[0];
+    
+    if (!obj) {
+      spinner.fail('Object not found');
+      return;
+    }
+    
     spinner.succeed();
 
     if (options.json) {
