@@ -104,7 +104,8 @@ export function formatStatus(status: string): string {
 /**
  * Truncate a string to a maximum length
  */
-export function truncate(str: string, maxLength: number): string {
+export function truncate(str: string | undefined | null, maxLength: number): string {
+  if (!str) return '';
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength - 3) + '...';
 }
@@ -116,9 +117,8 @@ export function createTable(options: {
   head: string[];
   colWidths?: number[];
 }): Table.Table {
-  return new Table({
+  const tableOptions: Table.TableConstructorOptions = {
     head: options.head.map((h) => chalk.bold.cyan(h)),
-    colWidths: options.colWidths,
     style: {
       head: [],
       border: [],
@@ -140,7 +140,14 @@ export function createTable(options: {
       'right-mid': '┤',
       middle: '│',
     },
-  });
+  };
+
+  // Only include colWidths if explicitly provided
+  if (options.colWidths) {
+    tableOptions.colWidths = options.colWidths;
+  }
+
+  return new Table(tableOptions);
 }
 
 /**

@@ -38,9 +38,9 @@ async function listAgents(options: { json?: boolean }): Promise<void> {
 
     for (const agent of agents) {
       table.push([
-        chalk.dim(agent.id.slice(0, 8)),
-        `${agent.emoji || '🤖'} ${display.truncate(agent.agent_name, 30)}`,
-        agent.agent_type,
+        agent.id || '-',
+        `${agent.emoji || '🤖'} ${display.truncate(agent.agent_name || '', 30)}`,
+        agent.agent_type || '-',
         agent.model || 'default',
         display.formatDate(agent.created_at),
       ]);

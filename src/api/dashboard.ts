@@ -464,15 +464,17 @@ export async function cancelExecution(
 // ============================================================================
 
 export async function listAgents(bucketSlug: string): Promise<Agent[]> {
-  const response = await get<{ agents: Agent[] }>('/ai/agents', { bucketSlug });
-  return response.agents || [];
+  const response = await get<{ agents?: Agent[]; data?: Agent[]; success?: boolean }>('/ai/agents', { bucketSlug });
+  // Handle { agents: [...] }, { data: [...] }, or direct array response formats
+  return response.agents || response.data || [];
 }
 
 export async function getAgent(bucketSlug: string, agentId: string): Promise<Agent> {
-  const response = await get<{ agent: Agent }>(`/ai/agents/${agentId}`, {
+  const response = await get<{ agent?: Agent; data?: Agent; success?: boolean }>(`/ai/agents/${agentId}`, {
     bucketSlug,
   });
-  return response.agent;
+  // Handle { agent: {...} }, { data: {...} }, or direct response formats
+  return response.agent || response.data || (response as unknown as Agent);
 }
 
 export interface CreateAgentData {
@@ -526,23 +528,25 @@ export async function runAgent(
   agentId: string,
   options: { prompt?: string } = {}
 ): Promise<AgentExecution> {
-  const response = await post<{ execution: AgentExecution }>(
+  const response = await post<{ execution?: AgentExecution; data?: AgentExecution; success?: boolean }>(
     `/ai/agents/${agentId}/run`,
     options,
     { bucketSlug }
   );
-  return response.execution;
+  // Handle { execution: {...} }, { data: {...} }, or direct response formats
+  return response.execution || response.data || (response as unknown as AgentExecution);
 }
 
 export async function listAgentExecutions(
   bucketSlug: string,
   agentId: string
 ): Promise<AgentExecution[]> {
-  const response = await get<{ executions: AgentExecution[] }>(
+  const response = await get<{ executions?: AgentExecution[]; data?: { executions: AgentExecution[] }; success?: boolean }>(
     `/ai/agents/${agentId}/executions`,
     { bucketSlug }
   );
-  return response.executions || [];
+  // Handle { executions: [...] } or { data: { executions: [...] } } response formats
+  return response.executions || response.data?.executions || [];
 }
 
 export async function getAgentExecution(
@@ -550,11 +554,12 @@ export async function getAgentExecution(
   agentId: string,
   executionId: string
 ): Promise<AgentExecution> {
-  const response = await get<{ execution: AgentExecution }>(
+  const response = await get<{ execution?: AgentExecution; data?: AgentExecution; success?: boolean }>(
     `/ai/agents/${agentId}/executions/${executionId}`,
     { bucketSlug }
   );
-  return response.execution;
+  // Handle { execution: {...} }, { data: {...} }, or direct response formats
+  return response.execution || response.data || (response as unknown as AgentExecution);
 }
 
 // ============================================================================
