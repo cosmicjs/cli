@@ -37,6 +37,7 @@ import {
 import * as api from '../api/dashboard.js';
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
+import { select } from '../utils/prompts.js';
 
 // Fallback images when Unsplash fails
 const FALLBACK_IMAGES = [
@@ -239,15 +240,15 @@ async function installContentToCosmic(
   sdk: ReturnType<typeof getSDKClient>,
   extractedContent: ExtractedContent,
   rl: readline.Interface
-): Promise<boolean> {
-  if (!sdk) return false;
+): Promise<{ added: boolean; nextAction: 'build' | 'content' | 'exit' | null }> {
+  if (!sdk) return { added: false, nextAction: null };
 
   const { objectTypes, demoObjects } = extractedContent;
   const totalTypes = objectTypes.length;
   const totalObjects = demoObjects.length;
 
   if (totalTypes === 0 && totalObjects === 0) {
-    return false;
+    return { added: false, nextAction: null };
   }
 
   console.log();
@@ -273,7 +274,7 @@ async function installContentToCosmic(
 
   if (answer.toLowerCase() === 'n' || answer.toLowerCase() === 'no') {
     console.log(chalk.dim('  Skipped content installation.'));
-    return false;
+    return { added: false, nextAction: null };
   }
 
   console.log();
@@ -283,7 +284,7 @@ async function installContentToCosmic(
   const bucketSlug = getCurrentBucketSlug();
   if (!bucketSlug) {
     console.log(chalk.red('  ✗ No bucket selected'));
-    return false;
+    return { added: false, nextAction: null };
   }
 
   try {
@@ -438,11 +439,27 @@ async function installContentToCosmic(
       console.log(chalk.dim('  ℹ All content already exists in Cosmic.'));
     }
 
-    return typesAdded > 0 || objectsAdded > 0;
+    // Show next steps prompt if content was added
+    if (typesAdded > 0 || objectsAdded > 0) {
+      console.log();
+      
+      const nextAction = await select<'build' | 'content' | 'exit'>({
+        message: 'What would you like to do next?',
+        choices: [
+          { name: 'build', message: 'Build and deploy an app' },
+          { name: 'content', message: 'Add more content' },
+          { name: 'exit', message: 'Exit' },
+        ],
+      });
+      
+      return { added: true, nextAction };
+    }
+
+    return { added: typesAdded > 0 || objectsAdded > 0, nextAction: null };
   } catch (err) {
     spinner.stop();
     console.log(chalk.red(`  ✗ Failed to add content: ${(err as Error).message}`));
-    return false;
+    return { added: false, nextAction: null };
   }
 }
 
@@ -599,7 +616,8 @@ Generate complete, realistic content that matches what the code expects. Include
     if (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0) {
       // Override hasAddContent since we know we want to add
       extractedContent.hasAddContent = true;
-      return await installContentToCosmic(sdk, extractedContent, rl);
+      const result = await installContentToCosmic(sdk, extractedContent, rl);
+      return result.added;
     } else {
       console.log(chalk.yellow('  Could not generate content metadata.'));
       console.log(chalk.dim('  Tip: Try "add content: [description]" to be more specific.'));
@@ -1332,7 +1350,18 @@ Generate complete, realistic content that matches what the code expects.` }],
             // Extract and install the content
             const extractedContent = extractContentFromResponse(fullResponse);
             if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-              await installContentToCosmic(sdk, extractedContent, rl);
+              const result = await installContentToCosmic(sdk, extractedContent, rl);
+              if (result.nextAction === 'build') {
+                isBuildMode = true;
+                console.log();
+                console.log(chalk.green('  Switching to build mode...'));
+                console.log();
+                console.log(chalk.cyan('  Describe the app you\'d like to build:'));
+              } else if (result.nextAction === 'exit') {
+                console.log(chalk.dim('  Goodbye!'));
+                rl.close();
+                return;
+              }
             } else {
               console.log(chalk.yellow('  No content metadata found in AI response.'));
               console.log(chalk.dim('  Try being more specific: add content: [description]'));
@@ -2797,6 +2826,8 @@ async function processMessage(
         let fullText = '';
         let isGeneratingFiles = false;
         let lastPrintedLength = 0;
+        let hasShownOverview = false;
+        let overviewPrinted = 0;
 
         const result = await api.streamingChat({
           messages: dashboardMessages,
@@ -2831,12 +2862,53 @@ async function processMessage(
                 }
               }
             } else if (!isGeneratingFiles) {
-              // Not generating files yet - stream the text response in real-time
-              // Only print the new content since last print
-              const newContent = fullText.slice(lastPrintedLength);
-              if (newContent) {
-                process.stdout.write(newContent);
-                lastPrintedLength = fullText.length;
+              // Check if this is structured app output (has markers) or conversational response
+              const hasAppMarkers = fullText.includes('<!-- APP_OVERVIEW_START -->') || 
+                                    fullText.includes('<!-- METADATA:') ||
+                                    fullText.includes('<!-- README_START -->');
+              
+              if (hasAppMarkers) {
+                // Structured app output - only show content between APP_OVERVIEW_START and APP_OVERVIEW_END
+                const overviewStart = fullText.indexOf('<!-- APP_OVERVIEW_START -->');
+                const overviewEnd = fullText.indexOf('<!-- APP_OVERVIEW_END -->');
+                
+                if (overviewStart !== -1 && !hasShownOverview) {
+                  // Extract and show only the overview content
+                  const startPos = overviewStart + '<!-- APP_OVERVIEW_START -->'.length;
+                  const endPos = overviewEnd !== -1 ? overviewEnd : fullText.length;
+                  const overviewContent = fullText.slice(startPos, endPos);
+                  
+                  // Show new content since last print
+                  if (overviewContent.length > overviewPrinted) {
+                    const newContent = overviewContent.slice(overviewPrinted);
+                    // Filter out PROGRESS markers and json code blocks following them
+                    const filteredContent = newContent
+                      .replace(/<!-- PROGRESS:[^>]+-->\s*```json\s*\/\/[^`]*```/g, '')
+                      .replace(/<!-- PROGRESS:[^>]+-->/g, '')
+                      .replace(/<!-- METADATA:[^>]+-->/g, '')
+                      .replace(/<!-- FRAMEWORK:[^>]+-->/g, '');
+                    if (filteredContent.trim()) {
+                      process.stdout.write(filteredContent);
+                    }
+                    overviewPrinted = overviewContent.length;
+                  }
+                  
+                  if (overviewEnd !== -1) {
+                    hasShownOverview = true;
+                    console.log();
+                  }
+                  lastPrintedLength = fullText.length;
+                } else if (overviewStart === -1) {
+                  // Has markers but no overview yet - wait for it
+                  lastPrintedLength = fullText.length;
+                }
+              } else {
+                // No app markers - stream normally (conversational response like questions)
+                const newContent = fullText.slice(lastPrintedLength);
+                if (newContent) {
+                  process.stdout.write(newContent);
+                  lastPrintedLength = fullText.length;
+                }
               }
             }
           },
@@ -2983,32 +3055,116 @@ async function processMessage(
         // Give Vercel a moment to detect the push
         await new Promise(resolve => setTimeout(resolve, 3000));
 
-        // Poll deployment status (will show in real-time)
-        try {
-          const deployResult = await pollDeploymentStatus(
-            bucketSlug,
-            currentRepo.name, // Use repo name as vercel project ID
-            `https://github.com/${currentRepo.owner}/${currentRepo.name}`
-          );
+        // Poll deployment status and offer AI fix loop until success or user declines
+        let keepFixing = true;
+        while (keepFixing) {
+          try {
+            const deployResult = await pollDeploymentStatus(
+              bucketSlug,
+              currentRepo.name, // Use repo name as vercel project ID
+              `https://github.com/${currentRepo.owner}/${currentRepo.name}`
+            );
 
-          // pollDeploymentStatus already shows success message and "open" hint
-          // Just handle the case where it returns failure (error already displayed by pollDeploymentStatus)
-          if (!deployResult.success && !deployResult.error) {
-            // Timeout or other non-error failure
-            console.log(chalk.dim('  Deployment is still in progress. Check Vercel dashboard for status.'));
+            // If deployment succeeded, exit the loop
+            if (deployResult.success) {
+              keepFixing = false;
+              break;
+            }
+
+            // If deployment failed and we have logs, offer to fix with AI
+            if (!deployResult.success && deployResult.logs && deployResult.logs.length > 0) {
+              console.log();
+              console.log(chalk.yellow('  Would you like AI to analyze the logs and fix the build error?'));
+              const fixInput = await sharedAskLine!(chalk.yellow('  Fix with AI? [Y/n]: '));
+              const fixWithAI = fixInput.toLowerCase() !== 'n';
+
+              if (!fixWithAI) {
+                keepFixing = false;
+                break;
+              }
+
+              console.log();
+              console.log(chalk.cyan('  Sending build logs to AI for analysis...'));
+              console.log();
+
+              // Format logs as text for the AI (filter out any logs with missing text)
+              const logsText = deployResult.logs
+                .filter(log => log.text && typeof log.text === 'string')
+                .map(log => `[${log.type}] ${log.text}`)
+                .join('\n');
+
+              const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
+
+              try {
+                await streamingRepositoryUpdate({
+                  repositoryOwner: currentRepo.owner,
+                  repositoryName: currentRepo.name,
+                  repositoryId: currentRepo.id,
+                  bucketSlug,
+                  messages: [{
+                    role: 'user',
+                    content: userMessage,
+                  }],
+                  onChunk: (chunk) => {
+                    process.stdout.write(chunk);
+                  },
+                  onComplete: () => {
+                    console.log();
+                    console.log();
+                    console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                    console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
+                    console.log();
+                  },
+                  onError: (error) => {
+                    console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                    console.log();
+                  },
+                });
+
+                // Wait a moment for Vercel to pick up the new commit, then poll again
+                console.log(chalk.dim('  Waiting for new deployment to start...'));
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                // Loop will poll again for the new deployment
+              } catch (aiError) {
+                console.log(chalk.red(`  ✗ Failed to fix with AI: ${(aiError as Error).message}`));
+                console.log();
+                keepFixing = false;
+              }
+            } else if (!deployResult.success && !deployResult.error) {
+              // Timeout or other non-error failure without logs
+              console.log(chalk.dim('  Deployment is still in progress. Check Vercel dashboard for status.'));
+              keepFixing = false;
+            } else {
+              // Some other failure case
+              keepFixing = false;
+            }
+          } catch (err) {
+            // Deployment polling failed - not critical, repo update succeeded
+            if (verbose) {
+              console.log(chalk.dim(`  [DEBUG] Deployment poll error: ${(err as Error).message}`));
+            }
+            console.log(chalk.dim('  Could not check deployment status. Changes were pushed to the repository.'));
+            keepFixing = false;
           }
-        } catch (err) {
-          // Deployment polling failed - not critical, repo update succeeded
-          if (verbose) {
-            console.log(chalk.dim(`  [DEBUG] Deployment poll error: ${(err as Error).message}`));
-          }
-          console.log(chalk.dim('  Could not check deployment status. Changes were pushed to the repository.'));
         }
 
         // Check if AI response contains content to add to Cosmic CMS
         const extractedContent = extractContentFromResponse(fullText);
         if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-          await installContentToCosmic(sdk, extractedContent, rl);
+          const result = await installContentToCosmic(sdk, extractedContent, rl);
+          if (result.nextAction === 'build') {
+            isBuildMode = true;
+            isRepoMode = false;
+            currentRepo = null;
+            console.log();
+            console.log(chalk.green('  Switching to build mode...'));
+            console.log();
+            console.log(chalk.cyan('  Describe the app you\'d like to build:'));
+          } else if (result.nextAction === 'exit') {
+            console.log(chalk.dim('  Goodbye!'));
+            rl.close();
+            return;
+          }
         } else {
           // Check if AI mentioned Cosmic content but didn't include metadata markers
           // This happens when AI explains what needs to be done but doesn't generate the content
@@ -3019,9 +3175,7 @@ async function processMessage(
           }
         }
       } else {
-        // Use streaming for regular chat (replaces "Thinking..." with real-time output)
-        console.log(); // New line before streaming output
-        
+        // Use streaming for regular chat
         // Convert messages to the format expected by streamingChat
         const dashboardMessages = conversationHistory.map((msg) => ({
           role: msg.role as 'user' | 'assistant',
@@ -3030,7 +3184,27 @@ async function processMessage(
         
         let fullText = '';
         let lastPrintedLength = 0;
-        let isInsideAction = false;
+        let isContentModelMode = false;
+        let dotCount = 0;
+        let loadingInterval: NodeJS.Timeout | null = null;
+        
+        // Check if the user message suggests content model creation
+        const lastUserMessage = conversationHistory[conversationHistory.length - 1]?.content?.toLowerCase() || '';
+        const isLikelyContentModel = lastUserMessage.includes('content model') || 
+                                      lastUserMessage.includes('object type') ||
+                                      lastUserMessage.includes('install_content_model');
+        
+        // Start loading indicator for likely content model requests
+        if (isLikelyContentModel) {
+          console.log();
+          process.stdout.write(chalk.dim('  Generating content model'));
+          loadingInterval = setInterval(() => {
+            dotCount = (dotCount + 1) % 4;
+            process.stdout.write('\r' + chalk.dim('  Generating content model' + '.'.repeat(dotCount + 1).padEnd(4)));
+          }, 400);
+        } else {
+          console.log(); // New line before streaming output
+        }
         
         const result = await api.streamingChat({
           messages: dashboardMessages,
@@ -3041,27 +3215,21 @@ async function processMessage(
           onChunk: (chunk) => {
             fullText += chunk;
             
-            // Detect when we enter an ACTION: block (don't stream the JSON)
-            if (!isInsideAction) {
-              const actionIndex = fullText.indexOf('ACTION:');
-              if (actionIndex !== -1 && actionIndex >= lastPrintedLength) {
-                // Print everything before ACTION:
-                const beforeAction = fullText.slice(lastPrintedLength, actionIndex);
-                if (beforeAction) {
-                  process.stdout.write(beforeAction);
-                }
-                isInsideAction = true;
-                lastPrintedLength = fullText.length;
+            // Detect content model output (METADATA markers or ACTION:)
+            if (!isContentModelMode) {
+              if (fullText.includes('<!-- METADATA:') || fullText.includes('ACTION:')) {
+                isContentModelMode = true;
+                // Don't stream content model JSON - just let it accumulate
                 return;
               }
             }
             
-            // Skip streaming while inside ACTION block
-            if (isInsideAction) {
+            // Skip streaming if in content model mode
+            if (isContentModelMode || isLikelyContentModel) {
               return;
             }
             
-            // Stream the text response in real-time
+            // Stream the text response in real-time for non-content-model responses
             const newContent = fullText.slice(lastPrintedLength);
             if (newContent) {
               process.stdout.write(newContent);
@@ -3070,10 +3238,16 @@ async function processMessage(
           },
         });
         
-        // Track if we already streamed the text
-        const alreadyStreamedText = lastPrintedLength > 0 && !isInsideAction;
+        // Clear loading interval
+        if (loadingInterval) {
+          clearInterval(loadingInterval);
+          process.stdout.write('\r' + ' '.repeat(40) + '\r'); // Clear the loading line
+        }
         
-        if (alreadyStreamedText || isInsideAction) {
+        // Track if we already streamed the text
+        const alreadyStreamedText = lastPrintedLength > 0 && !isContentModelMode;
+        
+        if (alreadyStreamedText) {
           console.log(); // New line after streamed content
         }
         
@@ -3081,13 +3255,28 @@ async function processMessage(
           text: result.text,
           messageId: result.messageId,
           usage: undefined,
-          _alreadyStreamed: alreadyStreamedText,
+          _alreadyStreamed: alreadyStreamedText || isContentModelMode,
         };
         
         // Check if AI response contains content to add to Cosmic CMS (metadata marker format)
         const extractedContent = extractContentFromResponse(fullText);
         if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-          await installContentToCosmic(sdk, extractedContent, rl);
+          const contentResult = await installContentToCosmic(sdk, extractedContent, rl);
+          if (contentResult.nextAction === 'build') {
+            isBuildMode = true;
+            console.log();
+            console.log(chalk.green('  Switching to build mode...'));
+            console.log();
+            console.log(chalk.cyan('  Describe the app you\'d like to build:'));
+          } else if (contentResult.nextAction === 'exit') {
+            console.log(chalk.dim('  Goodbye!'));
+            rl.close();
+            return;
+          }
+        } else if (!isContentModelMode && !alreadyStreamedText && fullText.trim()) {
+          // If we didn't stream and it's not content model, show the response now
+          console.log();
+          console.log(formatResponse(fullText.trim()));
         }
       }
     } catch (apiError) {
@@ -3340,6 +3529,7 @@ async function processMessage(
             const repositoryUrl = result.data?.repositoryUrl || result.data?.repository_url;
             if (repositoryUrl) {
               console.log(chalk.green(`  ✓ Repository created: ${repositoryUrl}`));
+              console.log(chalk.dim(`    Clone locally: git clone ${repositoryUrl}.git`));
             }
 
             // Debug log the deploy result
@@ -3379,12 +3569,13 @@ async function processMessage(
                   console.log(chalk.cyan('  Sending build logs to AI for analysis...'));
                   console.log();
 
-                  // Format logs as text for the AI
+                  // Format logs as text for the AI (filter out any logs with missing text)
                   const logsText = deployResult.logs
+                    .filter(log => log.text && typeof log.text === 'string')
                     .map(log => `[${log.type}] ${log.text}`)
                     .join('\n');
 
-                  const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText}\n\`\`\``;
+                  const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
 
                   try {
                     await streamingRepositoryUpdate({
@@ -3394,7 +3585,7 @@ async function processMessage(
                       bucketSlug,
                       messages: [{
                         role: 'user',
-                        content: [{ type: 'text', text: userMessage }],
+                        content: userMessage, // streamingRepositoryUpdate expects content as string
                       }],
                       onChunk: (chunk) => {
                         process.stdout.write(chunk);
@@ -3417,18 +3608,58 @@ async function processMessage(
                     await new Promise(resolve => setTimeout(resolve, 10000));
 
                     // Poll for the new deployment
-                    await pollDeploymentStatus(bucketSlug, vercelProjectId, repositoryUrl);
+                    const fixDeployResult = await pollDeploymentStatus(bucketSlug, vercelProjectId, repositoryUrl);
+                    
+                    // If deployment succeeded after fix, switch to repo mode
+                    if (fixDeployResult.success && repositoryUrl) {
+                      isBuildMode = false;
+                      isRepoMode = true;
+                      currentRepo = {
+                        id: repositoryId || '',
+                        owner: repoOwner,
+                        name: repoNameFromUrl,
+                        branch: 'main',
+                      };
+                      console.log();
+                      console.log(chalk.green('  Switched to repository mode.'));
+                      console.log(chalk.dim(`  You can now make updates to ${repoOwner}/${repoNameFromUrl}`));
+                      console.log();
+                    }
                   } catch (aiError) {
                     console.log(chalk.red(`  ✗ Failed to fix with AI: ${(aiError as Error).message}`));
                     console.log();
                   }
                 }
+              } else if (deployResult.success && repositoryUrl) {
+                // Deployment succeeded on first try - switch to repo mode
+                const urlParts = repositoryUrl.replace('https://github.com/', '').split('/');
+                const repoOwner = urlParts[0] || 'cosmic-community';
+                const repoNameFromUrl = urlParts[1] || repoName;
+                const repositoryId = result.data?.repository_id || '';
+                
+                isBuildMode = false;
+                isRepoMode = true;
+                currentRepo = {
+                  id: repositoryId,
+                  owner: repoOwner,
+                  name: repoNameFromUrl,
+                  branch: 'main',
+                };
+                console.log();
+                console.log(chalk.green('  Switched to repository mode.'));
+                console.log(chalk.dim(`  You can now make updates to ${repoOwner}/${repoNameFromUrl}`));
+                console.log();
               }
 
               // Check if AI response contains content to add to Cosmic CMS (build mode)
               const extractedContent = extractContentFromResponse(response.text);
               if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-                await installContentToCosmic(sdk, extractedContent, rl);
+                const contentResult = await installContentToCosmic(sdk, extractedContent, rl);
+                if (contentResult.nextAction === 'exit') {
+                  console.log(chalk.dim('  Goodbye!'));
+                  rl.close();
+                  return;
+                }
               }
             } else {
               // No Vercel deployment requested
@@ -3445,7 +3676,12 @@ async function processMessage(
               // Check if AI response contains content to add to Cosmic CMS (build mode - no deploy)
               const extractedContent = extractContentFromResponse(response.text);
               if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-                await installContentToCosmic(sdk, extractedContent, rl);
+                const contentResult = await installContentToCosmic(sdk, extractedContent, rl);
+                if (contentResult.nextAction === 'exit') {
+                  console.log(chalk.dim('  Goodbye!'));
+                  rl.close();
+                  return;
+                }
               }
             }
           } else {
