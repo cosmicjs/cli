@@ -33,6 +33,8 @@ import { createObjectsCommands } from './commands/objects.js';
 import { createMediaCommands } from './commands/media.js';
 import { createWorkflowsCommands } from './commands/workflows.js';
 import { createAgentsCommands } from './commands/agents.js';
+import { createReposCommands } from './commands/repos.js';
+import { createDeployCommands } from './commands/deploy.js';
 import { createAICommands } from './commands/ai.js';
 import { startChat } from './chat/repl.js';
 import { isAuthenticated } from './config/store.js';
@@ -59,15 +61,70 @@ createObjectsCommands(program);
 createMediaCommands(program);
 createWorkflowsCommands(program);
 createAgentsCommands(program);
+createReposCommands(program);
+createDeployCommands(program);
 createAICommands(program);
 
 // Add chat command (interactive mode)
 program
   .command('chat')
-  .description('Start interactive AI chat mode')
+  .description('Start interactive AI chat (manage content, build apps, create agents)')
   .option('-m, --model <model>', 'AI model to use')
+  .option('-b, --build', 'Start in app building mode')
+  .option('-r, --repo [name]', 'Start in repository update mode (update existing code)')
+  .option('--branch <branch>', 'Branch to use in repo mode (default: main)')
+  .option('-p, --prompt <prompt>', 'Start with an initial prompt')
   .action(async (options) => {
-    await startChat(options);
+    let initialPrompt = options.prompt;
+    
+    // If --build flag is used, set a helpful initial prompt
+    if (options.build && !initialPrompt) {
+      initialPrompt = 'I want to build an app. Ask me what kind of app I want to create, which framework I prefer (Next.js, React, Astro, Vue, etc.), and any specific features I need. Then generate the complete application code.';
+    }
+    
+    // In repo mode, don't set an initial prompt - let the user type their request
+    // The CLI will show a greeting and wait for input
+    await startChat({ 
+      model: options.model, 
+      initialPrompt: options.repo ? undefined : initialPrompt, // No auto-prompt for repo mode
+      buildMode: options.build,
+      repoMode: !!options.repo,
+      repoName: typeof options.repo === 'string' ? options.repo : undefined,
+      repoBranch: options.branch,
+    });
+  });
+
+// Add build command (shortcut to chat --build)
+program
+  .command('build')
+  .description('Build a new app with AI (generates code, creates repo, deploys)')
+  .option('-m, --model <model>', 'AI model to use')
+  .option('-p, --prompt <prompt>', 'Describe the app you want to build')
+  .action(async (options) => {
+    const initialPrompt = options.prompt 
+      ? `Build me an app: ${options.prompt}. Generate the complete application code.`
+      : 'I want to build an app. Ask me what kind of app I want to create, which framework I prefer (Next.js, React, Astro, Vue, etc.), and any specific features I need. Then generate the complete application code.';
+    
+    await startChat({ model: options.model, initialPrompt, buildMode: true });
+  });
+
+// Add update command (shortcut to chat --repo)
+program
+  .command('update [repo]')
+  .description('Update an existing app with AI (edits code, commits, deploys)')
+  .option('-m, --model <model>', 'AI model to use')
+  .option('-b, --branch <branch>', 'Branch to update (default: main)')
+  .option('-p, --prompt <prompt>', 'Describe the changes you want')
+  .action(async (repoArg, options) => {
+    // Only set initial prompt if explicitly provided via -p flag
+    // Otherwise, let user type their request after seeing the greeting
+    await startChat({ 
+      model: options.model, 
+      initialPrompt: options.prompt, // undefined if not provided
+      repoMode: true,
+      repoName: repoArg,
+      repoBranch: options.branch,
+    });
   });
 
 // Handle no command - show status and help
@@ -87,6 +144,8 @@ program.action(async () => {
     // Show available commands
     console.log(chalk.dim('Available commands:'));
     console.log(`  ${chalk.cyan('cosmic chat')}       Start interactive AI chat mode`);
+    console.log(`  ${chalk.cyan('cosmic build')}      ${chalk.green('Build an app with AI')} (creates repo & deploys)`);
+    console.log(`  ${chalk.cyan('cosmic update')}     ${chalk.magenta('Update an app with AI')} (edits code & deploys)`);
     console.log(`  ${chalk.cyan('cosmic login')}      Login to your Cosmic account`);
     console.log(`  ${chalk.cyan('cosmic use')}        Set bucket context`);
     console.log(`  ${chalk.cyan('cosmic ls')}         List objects in current bucket`);
@@ -94,6 +153,8 @@ program.action(async () => {
     console.log(`  ${chalk.cyan('cosmic media')}      Media file operations`);
     console.log(`  ${chalk.cyan('cosmic workflows')}  Workflow operations`);
     console.log(`  ${chalk.cyan('cosmic agents')}     AI agent operations`);
+    console.log(`  ${chalk.cyan('cosmic repos')}      Repository management`);
+    console.log(`  ${chalk.cyan('cosmic deploy')}     Deployment operations`);
     console.log();
     console.log(`Run ${chalk.cyan('cosmic --help')} for all commands and options.`);
   }

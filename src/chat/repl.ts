@@ -24,7 +24,17 @@ import {
   updateWorkflow,
   deleteWorkflow,
   listObjectTypes,
+  listRepositories,
+  deployRepository,
+  deployAIApp,
+  getLatestDeploymentStatus,
+  getDeploymentLogs,
+  streamingRepositoryUpdate,
+  createObjectType,
+  createObjectWithMetafields,
+  type DeploymentLog,
 } from '../api/dashboard.js';
+import * as api from '../api/dashboard.js';
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 
@@ -73,6 +83,369 @@ function addIdsToMetafields(metafields: Record<string, unknown>[]): Record<strin
   });
 }
 
+// ============================================================================
+// Content Extraction from AI Response (for "Add Content" feature)
+// ============================================================================
+
+interface ExtractedContent {
+  objectTypes: Record<string, unknown>[];
+  demoObjects: Record<string, unknown>[];
+  hasAddContent: boolean;
+}
+
+/**
+ * Extract JSON from a code block following a specific metadata marker
+ */
+function extractJsonFromCodeBlock(content: string, metadataType: string): unknown | null {
+  try {
+    // Find the metadata marker
+    const metadataPattern = new RegExp(
+      `<!--\\s*METADATA:\\s*\\{"type":"${metadataType}"\\}\\s*-->`,
+      'i'
+    );
+    const metadataMatch = metadataPattern.exec(content);
+
+    if (!metadataMatch) {
+      return null;
+    }
+
+    // Find the next JSON block after this metadata
+    const metadataPos = metadataMatch.index;
+    const afterMetadata = content.substring(metadataPos + metadataMatch[0].length);
+
+    // Look for the JSON code block
+    const jsonStartPattern = /```json\s*\n/;
+    const jsonStartMatch = jsonStartPattern.exec(afterMetadata);
+
+    if (!jsonStartMatch) {
+      return null;
+    }
+
+    // Start position of actual JSON content
+    const jsonStartPos = jsonStartMatch.index + jsonStartMatch[0].length;
+    const remainingContent = afterMetadata.substring(jsonStartPos);
+
+    // Use bracket/brace matching to find the end of JSON
+    let braceCount = 0;
+    let bracketCount = 0;
+    let inString = false;
+    let escapeNext = false;
+    let jsonEndPos = -1;
+
+    for (let i = 0; i < remainingContent.length; i++) {
+      const char = remainingContent[i];
+
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+
+      if (char === '\\' && inString) {
+        escapeNext = true;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+
+      if (!inString) {
+        if (char === '{') braceCount++;
+        if (char === '}') braceCount--;
+        if (char === '[') bracketCount++;
+        if (char === ']') bracketCount--;
+
+        if (braceCount === 0 && bracketCount === 0 && (char === '}' || char === ']')) {
+          jsonEndPos = i + 1;
+          break;
+        }
+      }
+    }
+
+    if (jsonEndPos === -1) {
+      // Fallback: look for closing ```
+      const fallbackPattern = /```(?:\s*\n|$)/;
+      const fallbackMatch = fallbackPattern.exec(remainingContent);
+      if (fallbackMatch) {
+        jsonEndPos = fallbackMatch.index;
+      } else {
+        return null;
+      }
+    }
+
+    const jsonContent = remainingContent.substring(0, jsonEndPos).trim();
+
+    try {
+      const parsedJson = JSON.parse(jsonContent);
+
+      // For objectType and demoObjects, arrays are valid
+      if (Array.isArray(parsedJson) && parsedJson.length > 0 &&
+        metadataType !== 'objectType' && metadataType !== 'demoObjects') {
+        return parsedJson[0];
+      }
+
+      return parsedJson;
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract object types and demo objects from AI response content
+ */
+function extractContentFromResponse(content: string): ExtractedContent {
+  const hasAddContent = content.includes('<!-- METADATA: {"type":"addContent"} -->');
+
+  // Extract object types
+  const directObjectTypes = extractJsonFromCodeBlock(content, 'objectType');
+  let objectTypes: Record<string, unknown>[] = [];
+  if (directObjectTypes) {
+    objectTypes = Array.isArray(directObjectTypes) ? directObjectTypes : [directObjectTypes];
+  }
+
+  // Extract demo objects
+  const directDemoObjects = extractJsonFromCodeBlock(content, 'demoObjects');
+  let demoObjects: Record<string, unknown>[] = [];
+  if (directDemoObjects) {
+    demoObjects = Array.isArray(directDemoObjects) ? directDemoObjects : [directDemoObjects];
+  }
+
+  return {
+    objectTypes,
+    demoObjects,
+    hasAddContent,
+  };
+}
+
+/**
+ * Create a slug from a title
+ */
+function createSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Install content (object types and demo objects) to Cosmic
+ */
+async function installContentToCosmic(
+  sdk: ReturnType<typeof getSDKClient>,
+  extractedContent: ExtractedContent,
+  rl: readline.Interface
+): Promise<boolean> {
+  if (!sdk) return false;
+
+  const { objectTypes, demoObjects } = extractedContent;
+  const totalTypes = objectTypes.length;
+  const totalObjects = demoObjects.length;
+
+  if (totalTypes === 0 && totalObjects === 0) {
+    return false;
+  }
+
+  console.log();
+  console.log(chalk.cyan('  📦 Content detected in AI response:'));
+  if (totalTypes > 0) {
+    console.log(chalk.dim(`     ${totalTypes} object type${totalTypes !== 1 ? 's' : ''}`));
+    for (const type of objectTypes) {
+      console.log(chalk.dim(`       • ${(type as { title?: string }).title || (type as { slug?: string }).slug || 'Unnamed'}`));
+    }
+  }
+  if (totalObjects > 0) {
+    console.log(chalk.dim(`     ${totalObjects} content object${totalObjects !== 1 ? 's' : ''}`));
+    for (const obj of demoObjects) {
+      console.log(chalk.dim(`       • ${(obj as { title?: string }).title || 'Unnamed'}`));
+    }
+  }
+  console.log();
+
+  // Prompt user (default to yes on Enter)
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(chalk.yellow('  Would you like to add this content to Cosmic? (Y/n) '), resolve);
+  });
+
+  if (answer.toLowerCase() === 'n' || answer.toLowerCase() === 'no') {
+    console.log(chalk.dim('  Skipped content installation.'));
+    return false;
+  }
+
+  console.log();
+  spinner.start('Adding content to Cosmic...');
+
+  // Get bucket slug for DAPI calls
+  const bucketSlug = getCurrentBucketSlug();
+  if (!bucketSlug) {
+    console.log(chalk.red('  ✗ No bucket selected'));
+    return false;
+  }
+
+  try {
+    // Add object types first using DAPI (like the dashboard does)
+    let typesAdded = 0;
+    let typesSkipped = 0;
+    const typeErrors: string[] = [];
+
+    for (const type of objectTypes) {
+      try {
+        // Add IDs to metafields
+        const typeWithIds = { ...type } as Record<string, unknown>;
+        if (Array.isArray(typeWithIds.metafields)) {
+          typeWithIds.metafields = addIdsToMetafields(
+            typeWithIds.metafields as Record<string, unknown>[]
+          );
+        }
+
+        spinner.update(`Adding object type "${(type as { title?: string }).title}"...`);
+
+        // Use DAPI endpoint like the dashboard
+        await createObjectType(bucketSlug, typeWithIds as Parameters<typeof createObjectType>[1]);
+        typesAdded++;
+      } catch (err) {
+        const errorMsg = (err as Error).message;
+        // Check if type already exists
+        if (errorMsg.includes('already exists') || errorMsg.includes('duplicate') || errorMsg.includes('Object Type slug is already used')) {
+          typesSkipped++;
+        } else {
+          typeErrors.push(`${(type as { title?: string }).title || 'unknown'}: ${errorMsg}`);
+        }
+      }
+    }
+
+    // Add demo objects using DAPI (like the dashboard does)
+    let objectsAdded = 0;
+    let objectsSkipped = 0;
+    const objectErrors: string[] = [];
+
+    for (const obj of demoObjects) {
+      try {
+        const objTyped = obj as {
+          title?: string;
+          slug?: string;
+          type?: string;
+          content?: string;
+          status?: string;
+          thumbnail?: string;
+          locale?: string;
+          metafields?: Record<string, unknown>[];
+        };
+
+        // Format object for DAPI (matching dashboard format)
+        const insertPayload: {
+          title: string;
+          slug: string;
+          type: string;
+          content?: string;
+          status?: string;
+          thumbnail?: string;
+          locale?: string;
+          metafields?: Array<{
+            id?: string;
+            title?: string;
+            key: string;
+            type: string;
+            value?: unknown;
+            required?: boolean;
+          }>;
+        } = {
+          title: objTyped.title || 'Untitled',
+          slug: objTyped.slug || createSlug(objTyped.title || 'untitled'),
+          type: objTyped.type || 'objects',
+          content: objTyped.content || '',
+          status: objTyped.status || 'published',
+          locale: objTyped.locale || '',
+        };
+
+        if (objTyped.thumbnail) {
+          // Handle Unsplash URLs
+          if (objTyped.thumbnail.includes('images.unsplash.com')) {
+            spinner.update(`Uploading image for "${objTyped.title}"...`);
+            const uploaded = await uploadUnsplashImage(objTyped.thumbnail, sdk);
+            if (uploaded) {
+              insertPayload.thumbnail = uploaded;
+            }
+          } else if (objTyped.thumbnail.includes('imgix.cosmicjs.com')) {
+            insertPayload.thumbnail = objTyped.thumbnail.replace('https://imgix.cosmicjs.com/', '');
+          } else {
+            insertPayload.thumbnail = objTyped.thumbnail;
+          }
+        }
+
+        if (Array.isArray(objTyped.metafields)) {
+          // Add IDs and ensure proper format for each metafield
+          insertPayload.metafields = addIdsToMetafields(objTyped.metafields).map(mf => {
+            const metafield = mf as Record<string, unknown>;
+            return {
+              id: metafield.id as string,
+              title: metafield.title as string || (metafield.key as string).charAt(0).toUpperCase() + (metafield.key as string).slice(1).replace(/_/g, ' '),
+              key: metafield.key as string,
+              type: metafield.type as string,
+              value: metafield.value,
+              required: metafield.required as boolean,
+            };
+          });
+        }
+
+        spinner.update(`Adding "${objTyped.title}"...`);
+
+        // Use DAPI endpoint like the dashboard
+        await createObjectWithMetafields(bucketSlug, insertPayload);
+        objectsAdded++;
+      } catch (err) {
+        const errorMsg = (err as Error).message;
+        // Check if object already exists
+        if (errorMsg.includes('already exists') || errorMsg.includes('duplicate')) {
+          objectsSkipped++;
+        } else {
+          objectErrors.push(`${(obj as { title?: string }).title || 'unknown'}: ${errorMsg}`);
+        }
+      }
+    }
+
+    spinner.stop();
+
+    // Show results
+    if (typesAdded > 0 || objectsAdded > 0) {
+      console.log(chalk.green(`  ✓ Added ${typesAdded} object type${typesAdded !== 1 ? 's' : ''} and ${objectsAdded} content object${objectsAdded !== 1 ? 's' : ''}`));
+    }
+
+    if (typesSkipped > 0 || objectsSkipped > 0) {
+      console.log(chalk.dim(`  ℹ Skipped ${typesSkipped} existing type${typesSkipped !== 1 ? 's' : ''} and ${objectsSkipped} existing object${objectsSkipped !== 1 ? 's' : ''}`));
+    }
+
+    // Show errors if any
+    if (typeErrors.length > 0) {
+      console.log(chalk.yellow(`  ⚠ Failed to add ${typeErrors.length} object type${typeErrors.length !== 1 ? 's' : ''}:`));
+      for (const err of typeErrors) {
+        console.log(chalk.dim(`     • ${err}`));
+      }
+    }
+
+    if (objectErrors.length > 0) {
+      console.log(chalk.yellow(`  ⚠ Failed to add ${objectErrors.length} content object${objectErrors.length !== 1 ? 's' : ''}:`));
+      for (const err of objectErrors) {
+        console.log(chalk.dim(`     • ${err}`));
+      }
+    }
+
+    if (typesAdded === 0 && objectsAdded === 0 && typeErrors.length === 0 && objectErrors.length === 0) {
+      console.log(chalk.dim('  ℹ All content already exists in Cosmic.'));
+    }
+
+    return typesAdded > 0 || objectsAdded > 0;
+  } catch (err) {
+    spinner.stop();
+    console.log(chalk.red(`  ✗ Failed to add content: ${(err as Error).message}`));
+    return false;
+  }
+}
+
 /**
  * Upload an image from URL (Unsplash) to Cosmic media library
  */
@@ -115,6 +488,305 @@ async function uploadUnsplashImage(
 }
 
 /**
+ * Detect if AI response mentions Cosmic content that needs to be created
+ * (without including the metadata markers)
+ */
+function detectCosmicContentMention(content: string): boolean {
+  // Check if already has metadata markers - if so, return false since it will be handled elsewhere
+  if (content.includes('<!-- METADATA: {"type":"addContent"} -->') ||
+    content.includes('<!-- METADATA: {"type":"objectType"} -->') ||
+    content.includes('<!-- METADATA: {"type":"demoObjects"} -->')) {
+    return false;
+  }
+
+  // Patterns that indicate the AI is talking about creating Cosmic content
+  const cosmicContentPatterns = [
+    /create\s+(?:an?\s+)?(?:object\s+type|content\s+type)/i,
+    /add\s+(?:an?\s+)?(?:object\s+type|content\s+type)/i,
+    /cosmic\s+(?:cms|dashboard)\s+(?:object|content)/i,
+    /\bobject\s+type\s+(?:called|named|for)/i,
+    /fetch(?:es|ing)?\s+(?:from\s+)?cosmic/i,
+    /get[A-Z][a-zA-Z]+Page\s*\(\)/i, // getAboutPage(), getHomePage(), etc.
+    /\bmetafields?\s+(?:for|with|including)/i,
+    /content\s+from\s+cosmic/i,
+    /powered\s+by\s+cosmic/i,
+    /\bcms\s+content\b/i,
+    /create\s+this\s+object\s+type/i,
+    /need\s+to\s+create\s+(?:the\s+)?(?:object|content)/i,
+  ];
+
+  // Check if content matches any pattern
+  return cosmicContentPatterns.some(pattern => pattern.test(content));
+}
+
+/**
+ * Offer to generate and add content to Cosmic after a repo update
+ */
+async function offerContentGeneration(
+  sdk: ReturnType<typeof getSDKClient>,
+  aiResponse: string,
+  conversationHistory: Array<{ role: string; content: string }>,
+  model: string,
+  bucketSlug: string,
+  rl: readline.Interface
+): Promise<boolean> {
+  console.log();
+  console.log(chalk.cyan('  💡 It looks like this code expects content from Cosmic CMS.'));
+
+  // Prompt user (default to yes on Enter)
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(chalk.yellow('  Would you like to generate and add the content? (Y/n) '), resolve);
+  });
+
+  if (answer.toLowerCase() === 'n' || answer.toLowerCase() === 'no') {
+    console.log(chalk.dim('  Skipped content generation.'));
+    console.log(chalk.dim('  Tip: Type "add content" anytime to generate content for your code.'));
+    return false;
+  }
+
+  console.log();
+  spinner.start('Generating content for Cosmic CMS...');
+
+  try {
+    // Build context from conversation history
+    const contextMessages = conversationHistory.slice(-4).map((msg) => ({
+      role: msg.role as 'user' | 'assistant',
+      content: [{ type: 'text' as const, text: msg.content }],
+    }));
+
+    // Add the content generation request
+    contextMessages.push({
+      role: 'user',
+      content: [{
+        type: 'text', text: `Based on the code changes you just made, generate the Cosmic CMS object types and demo content that the code expects.
+
+IMPORTANT: Generate the content using these EXACT metadata markers:
+
+<!-- METADATA: {"type":"addContent"} -->
+<!-- METADATA: {"type":"objectType"} -->
+\`\`\`json
+[{ "title": "...", "slug": "...", "emoji": "...", "singleton": true/false, "metafields": [{ "title": "...", "key": "...", "type": "...", "required": true/false }] }]
+\`\`\`
+
+<!-- METADATA: {"type":"demoObjects"} -->
+\`\`\`json
+[{ "type": "slug-of-object-type", "title": "...", "status": "published", "thumbnail": "https://images.unsplash.com/...", "metafields": [{ "key": "...", "type": "...", "value": "..." }] }]
+\`\`\`
+
+Generate complete, realistic content that matches what the code expects. Include:
+1. All object types referenced in the code
+2. Sample demo content with real values
+3. Appropriate Unsplash images for thumbnails` }],
+    });
+
+    // Use the streaming chat API
+    let fullResponse = '';
+    await api.streamingChat({
+      messages: contextMessages,
+      bucketSlug,
+      model,
+      maxTokens: 16000,
+      viewMode: 'content-model',
+      onChunk: (chunk) => {
+        fullResponse += chunk;
+      },
+    });
+
+    spinner.stop();
+
+    // Extract and install the content
+    const extractedContent = extractContentFromResponse(fullResponse);
+    if (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0) {
+      // Override hasAddContent since we know we want to add
+      extractedContent.hasAddContent = true;
+      return await installContentToCosmic(sdk, extractedContent, rl);
+    } else {
+      console.log(chalk.yellow('  Could not generate content metadata.'));
+      console.log(chalk.dim('  Tip: Try "add content: [description]" to be more specific.'));
+      return false;
+    }
+  } catch (err) {
+    spinner.stop();
+    console.log(chalk.red(`  Error generating content: ${(err as Error).message}`));
+    return false;
+  }
+}
+
+/**
+ * Format elapsed time in human-readable format
+ */
+function formatElapsedTime(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+/**
+ * Poll for deployment status until ready, error, or timeout
+ */
+async function pollDeploymentStatus(
+  bucketSlug: string,
+  vercelProjectId: string,
+  repositoryUrl?: string
+): Promise<{ success: boolean; url?: string; error?: string; deploymentId?: string; logs?: DeploymentLog[] }> {
+  const POLL_INTERVAL = 5000; // 5 seconds
+  const TIMEOUT = 300000; // 5 minutes
+  const startTime = Date.now();
+
+  console.log();
+  console.log(chalk.yellow('  Waiting for Vercel deployment...'));
+
+  let lastStatus = '';
+  let dotCount = 0;
+
+  const verbose = process.env.COSMIC_DEBUG === '1' || process.env.COSMIC_DEBUG === '2';
+
+  while (Date.now() - startTime < TIMEOUT) {
+    try {
+      const response = await getLatestDeploymentStatus(bucketSlug, vercelProjectId);
+
+      if (verbose) {
+        console.log(`\n[DEBUG] Deployment response: ${JSON.stringify(response, null, 2)}`);
+      }
+
+      if (!response.success || !response.deployment) {
+        // No deployment found yet, keep waiting
+        const elapsed = formatElapsedTime(Date.now() - startTime);
+        dotCount = (dotCount + 1) % 4;
+        const dots = '.'.repeat(dotCount + 1);
+        process.stdout.write(`\r  ${chalk.cyan('Waiting')}${dots.padEnd(4)} ${chalk.dim(`(${elapsed})`)}`);
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+        continue;
+      }
+
+      // Handle different possible status field names from the API
+      const deployment = response.deployment;
+      const status = deployment.status || (deployment as Record<string, unknown>).readyState || (deployment as Record<string, unknown>).state;
+      const url = deployment.url;
+      const elapsed = formatElapsedTime(Date.now() - startTime);
+
+      // Clear the previous line and show new status
+      if (status !== lastStatus) {
+        lastStatus = status;
+        dotCount = 0;
+      }
+
+      // Normalize status to uppercase for comparison
+      const normalizedStatus = String(status || '').toUpperCase();
+
+      // Show status based on deployment status
+      if (normalizedStatus === 'READY') {
+        // Clear the line first
+        process.stdout.write('\r' + ' '.repeat(50) + '\r');
+        console.log(chalk.green(`  ✓ Deployment complete!`));
+        console.log();
+        const liveUrl = url?.startsWith('http') ? url : `https://${url}`;
+        console.log(chalk.bold.green(`  🌐 Live at: ${liveUrl}`));
+
+        // Save for "open" command
+        lastDeploymentUrl = liveUrl;
+
+        console.log();
+        console.log(chalk.dim('  Type "open" to view in browser, or continue chatting.'));
+        console.log();
+
+        return { success: true, url: liveUrl };
+      }
+
+      if (normalizedStatus === 'ERROR') {
+        process.stdout.write('\r' + ' '.repeat(50) + '\r');
+        const errorMsg = response.deployment.meta?.error?.message || 'Build failed';
+        console.log(chalk.red(`  ✗ Deployment failed: ${errorMsg}`));
+        console.log();
+
+        // Fetch and display build logs
+        const deploymentId = response.deployment.deploymentId;
+        let fetchedLogs: DeploymentLog[] = [];
+
+        if (deploymentId) {
+          console.log(chalk.dim('  Fetching build logs...'));
+          const logsResponse = await getDeploymentLogs(deploymentId);
+
+          if (logsResponse.success && logsResponse.logs && logsResponse.logs.length > 0) {
+            fetchedLogs = logsResponse.logs;
+            console.log();
+            console.log(chalk.bold.red('  Build Logs:'));
+            console.log(chalk.dim('  ' + '─'.repeat(60)));
+
+            // Filter to show only errors and important messages (last 30 lines)
+            const relevantLogs = logsResponse.logs
+              .filter(log => log.type === 'stderr' || log.text.toLowerCase().includes('error'))
+              .slice(-30);
+
+            if (relevantLogs.length > 0) {
+              for (const log of relevantLogs) {
+                const logText = log.text.trim();
+                if (logText) {
+                  // Color code based on log type
+                  const color = log.type === 'stderr' ? chalk.red : chalk.yellow;
+                  // Indent and wrap long lines
+                  const lines = logText.split('\n');
+                  for (const line of lines) {
+                    console.log(color(`  ${line}`));
+                  }
+                }
+              }
+            } else {
+              // If no error logs found, show the last few logs
+              const lastLogs = logsResponse.logs.slice(-15);
+              for (const log of lastLogs) {
+                const logText = log.text.trim();
+                if (logText) {
+                  console.log(chalk.dim(`  ${logText}`));
+                }
+              }
+            }
+
+            console.log(chalk.dim('  ' + '─'.repeat(60)));
+            console.log();
+          }
+        }
+
+        return { success: false, error: errorMsg, deploymentId, logs: fetchedLogs };
+      }
+
+      if (normalizedStatus === 'CANCELED') {
+        process.stdout.write('\r' + ' '.repeat(50) + '\r');
+        console.log(chalk.yellow(`  ✗ Deployment was canceled`));
+        console.log();
+        return { success: false, error: 'Deployment canceled' };
+      }
+
+      // Still building, queued, or initializing
+      dotCount = (dotCount + 1) % 4;
+      const dots = '.'.repeat(dotCount + 1);
+      let statusDisplay = status || 'Building';
+      if (normalizedStatus === 'QUEUED') statusDisplay = 'Queued';
+      else if (normalizedStatus === 'INITIALIZING') statusDisplay = 'Initializing';
+      else if (normalizedStatus === 'BUILDING') statusDisplay = 'Building';
+
+      process.stdout.write(`\r  ${chalk.cyan(statusDisplay)}${dots.padEnd(4)} ${chalk.dim(`(${elapsed})`)}`);
+
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+    } catch (error) {
+      // On error, continue polling (might be temporary)
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+    }
+  }
+
+  // Timeout reached
+  process.stdout.write('\r' + ' '.repeat(50) + '\r');
+  console.log(chalk.yellow(`  ⏱ Deployment is taking longer than expected.`));
+  console.log(chalk.dim(`  Check status at: https://vercel.com/dashboard`));
+  console.log();
+  return { success: false, error: 'Timeout waiting for deployment' };
+}
+
+/**
  * Process Unsplash URLs in an object's metadata and thumbnail
  */
 async function processUnsplashUrls(
@@ -138,11 +810,11 @@ async function processUnsplashUrls(
   // Process metadata
   if (obj.metadata && typeof obj.metadata === 'object') {
     const metadata = obj.metadata as Record<string, unknown>;
-    
+
     for (const [key, value] of Object.entries(metadata)) {
       // Find the metafield definition to check type
       const metafieldDef = objectTypeMetafields.find((m) => m.key === key);
-      
+
       // Handle file type with Unsplash URL
       if (
         metafieldDef?.type === 'file' &&
@@ -158,7 +830,7 @@ async function processUnsplashUrls(
           metadata[key] = fallback.replace('https://imgix.cosmicjs.com/', '');
         }
       }
-      
+
       // Handle files type (array) with Unsplash URLs
       if (
         metafieldDef?.type === 'files' &&
@@ -185,6 +857,52 @@ async function processUnsplashUrls(
   }
 }
 
+/**
+ * Parse code blocks from AI response to extract files
+ * Matches the backend's parseCodeBlocks logic from githubDeployment.service.js
+ */
+function parseCodeBlocks(aiResponse: string): Record<string, string> {
+  const files: Record<string, string> = {};
+
+  // Regex to match code blocks with file path comments
+  // Format: ```language\n// path/to/file.ext\n[content]\n```
+  const regex = /```(?:\w+)?\n\/\/\s*([^\n]+)\n([\s\S]*?)```/g;
+
+  let match;
+  while ((match = regex.exec(aiResponse)) !== null) {
+    const filePath = match[1].trim();
+    const content = match[2].trim();
+
+    // Skip empty files or invalid paths
+    if (!filePath || !content || filePath.length < 2) {
+      continue;
+    }
+
+    // Clean the file path (remove any leading/trailing whitespace or slashes)
+    const cleanPath = filePath.replace(/^\/+/, '').trim();
+
+    if (cleanPath && content) {
+      files[cleanPath] = content;
+    }
+  }
+
+  return files;
+}
+
+/**
+ * Extract app metadata from AI response (FRAMEWORK and APP_NAME markers)
+ */
+function extractAppMetadata(aiResponse: string): { framework: string | null; appName: string | null } {
+  const frameworkMatch = aiResponse.match(/<!--\s*FRAMEWORK:\s*(\w+)\s*-->/i);
+  // APP_NAME can have spaces, so match anything until the closing -->
+  const appNameMatch = aiResponse.match(/<!--\s*APP_NAME:\s*([^>]+?)\s*-->/i);
+
+  return {
+    framework: frameworkMatch ? frameworkMatch[1].toLowerCase() : null,
+    appName: appNameMatch ? appNameMatch[1].trim() : null,
+  };
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -193,10 +911,31 @@ interface ChatMessage {
 interface ChatOptions {
   model?: string;
   initialPrompt?: string;  // Pre-loaded prompt to start the conversation
+  buildMode?: boolean;     // Whether we're in app building mode (uses higher token limit)
+  repoMode?: boolean;      // Whether we're in repository update mode
+  repoName?: string;       // Specific repository name to update
+  repoBranch?: string;     // Branch to use in repo mode
 }
 
 // Conversation history
 let conversationHistory: ChatMessage[] = [];
+
+// Build mode flag - when true, uses higher max_tokens for app generation
+let isBuildMode = false;
+
+// Repo mode flag - when true, uses streamingRepositoryUpdate instead of regular chat
+let isRepoMode = false;
+
+// Current repository info for repo mode
+let currentRepo: {
+  id: string;
+  owner: string;
+  name: string;
+  branch: string;
+} | null = null;
+
+// Last successful deployment URL (for "open" command)
+let lastDeploymentUrl: string | null = null;
 
 /**
  * Try to fetch and store bucket keys from the Dashboard API
@@ -230,13 +969,20 @@ async function tryFetchBucketKeys(bucketSlug: string): Promise<boolean> {
  * Start the interactive chat
  */
 export async function startChat(options: ChatOptions): Promise<void> {
+  // Set build mode flag if provided (affects max_tokens)
+  isBuildMode = options.buildMode || false;
+
+  // Set repo mode flag if provided
+  isRepoMode = options.repoMode || false;
+  currentRepo = null;
+
   // Add global error handlers for debugging
   process.on('uncaughtException', (err) => {
     console.error(chalk.red(`\n[CRASH] Uncaught exception: ${err.message}`));
     console.error(chalk.dim(err.stack || ''));
     process.exit(1);
   });
-  
+
   process.on('unhandledRejection', (reason, promise) => {
     console.error(chalk.red(`\n[CRASH] Unhandled rejection:`));
     console.error(chalk.dim(String(reason)));
@@ -268,6 +1014,93 @@ export async function startChat(options: ChatOptions): Promise<void> {
   }
 
   const model = options.model || getDefaultModel();
+
+  // If repo mode, select a repository first
+  if (isRepoMode) {
+    spinner.start('Loading repositories...');
+    try {
+      const { repositories } = await listRepositories(bucketSlug);
+      spinner.succeed();
+
+      if (repositories.length === 0) {
+        display.error('No repositories connected to this bucket.');
+        display.info(`Build an app first with: ${chalk.cyan('cosmic chat --build')}`);
+        process.exit(1);
+      }
+
+      // If a specific repo name was provided, find it
+      if (options.repoName) {
+        const repo = repositories.find(r =>
+          r.repository_name?.toLowerCase() === options.repoName?.toLowerCase() ||
+          r.repository_name?.toLowerCase().includes(options.repoName?.toLowerCase() || '')
+        );
+        if (!repo) {
+          display.error(`Repository "${options.repoName}" not found.`);
+          display.info('Available repositories:');
+          for (const r of repositories) {
+            console.log(chalk.dim(`  - ${r.repository_name}`));
+          }
+          process.exit(1);
+        }
+        currentRepo = {
+          id: repo.id,
+          owner: repo.repository_owner || 'cosmic-community',
+          name: repo.repository_name || '',
+          branch: options.repoBranch || repo.default_branch || 'main',
+        };
+      } else if (repositories.length === 1) {
+        // Auto-select if only one repo
+        const repo = repositories[0];
+        currentRepo = {
+          id: repo.id,
+          owner: repo.repository_owner || 'cosmic-community',
+          name: repo.repository_name || '',
+          branch: options.repoBranch || repo.default_branch || 'main',
+        };
+      } else {
+        // Show selection menu
+        console.log();
+        console.log(chalk.bold('Select a repository to update:'));
+        console.log();
+        repositories.forEach((repo, index) => {
+          console.log(chalk.dim(`  ${index + 1}. `) + chalk.cyan(repo.repository_name) + chalk.dim(` (${repo.framework || 'other'})`));
+        });
+        console.log();
+
+        // Simple number selection
+        const answer = await new Promise<string>((resolve) => {
+          const tempRl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          });
+          tempRl.question(chalk.yellow('  Enter number (1-' + repositories.length + '): '), (input) => {
+            tempRl.close();
+            resolve(input);
+          });
+        });
+
+        const selection = parseInt(answer, 10);
+        if (isNaN(selection) || selection < 1 || selection > repositories.length) {
+          display.error('Invalid selection.');
+          process.exit(1);
+        }
+
+        const repo = repositories[selection - 1];
+        currentRepo = {
+          id: repo.id,
+          owner: repo.repository_owner || 'cosmic-community',
+          name: repo.repository_name || '',
+          branch: options.repoBranch || repo.default_branch || 'main',
+        };
+      }
+
+      console.log(chalk.green(`  ✓ Selected: ${currentRepo.owner}/${currentRepo.name} (${currentRepo.branch})`));
+    } catch (error) {
+      spinner.fail('Failed to load repositories');
+      display.error((error as Error).message);
+      process.exit(1);
+    }
+  }
 
   // Print header
   printHeader(model);
@@ -318,21 +1151,21 @@ export async function startChat(options: ChatOptions): Promise<void> {
       pendingReject = null;
     }
   });
-  
+
   // Listen for stdin end/close events
   process.stdin.on('end', () => {
     console.error(chalk.red('\n[DEBUG] stdin end event'));
   });
-  
+
   process.stdin.on('close', () => {
     console.error(chalk.red('\n[DEBUG] stdin close event'));
   });
-  
+
   // Listen for process exit
   process.on('exit', (code) => {
     console.error(chalk.dim(`\n[DEBUG] Process exit with code: ${code}`));
   });
-  
+
   process.on('beforeExit', (code) => {
     console.error(chalk.dim(`\n[DEBUG] Process beforeExit with code: ${code}`));
   });
@@ -352,14 +1185,14 @@ export async function startChat(options: ChatOptions): Promise<void> {
         console.log(chalk.dim(`\n[DEBUG] stdin readable: ${process.stdin.readable}, destroyed: ${process.stdin.destroyed}`));
         console.log(chalk.dim(`[DEBUG] rl closed: ${(rl as any).closed}, terminal: ${(rl as any).terminal}`));
       }
-      
+
       // Check if stdin is still readable
       if (!process.stdin.readable || process.stdin.destroyed) {
         console.error(chalk.red('\n[ERROR] stdin is no longer readable'));
         reject(new Error('stdin closed'));
         return;
       }
-      
+
       // Ensure stdin is flowing and readline is actively reading
       // This is critical to keep the event loop active
       process.stdin.resume();
@@ -426,6 +1259,91 @@ export async function startChat(options: ChatOptions): Promise<void> {
           continue;
         }
 
+        if (input.toLowerCase() === 'open') {
+          if (lastDeploymentUrl) {
+            console.log(chalk.dim(`  Opening ${lastDeploymentUrl}...`));
+            // Use dynamic import for open package
+            const open = await import('open').then(m => m.default);
+            await open(lastDeploymentUrl);
+          } else {
+            console.log(chalk.dim('  No deployment URL available. Deploy an app first.'));
+          }
+          continue;
+        }
+
+        // Handle "add content" command - generates content metadata and prompts to add
+        if (input.toLowerCase() === 'add content' || input.toLowerCase().startsWith('add content:')) {
+          const contentDescription = input.toLowerCase().startsWith('add content:')
+            ? input.substring('add content:'.length).trim()
+            : '';
+
+          console.log();
+          spinner.start('Generating content for Cosmic CMS...');
+
+          try {
+            // Build a prompt to generate content metadata
+            const contentPrompt = contentDescription
+              ? `Generate Cosmic CMS content for: ${contentDescription}`
+              : `Based on the code we've been working on, generate any Cosmic CMS object types and demo content that would be needed. Look at the types, API calls, and pages to determine what content is expected from Cosmic.`;
+
+            // Use the conversation history for context
+            const contextMessages = conversationHistory.slice(-6).map((msg) => ({
+              role: msg.role as 'user' | 'assistant',
+              content: [{ type: 'text' as const, text: msg.content }],
+            }));
+
+            // Add the content generation request
+            contextMessages.push({
+              role: 'user',
+              content: [{
+                type: 'text', text: `${contentPrompt}
+
+IMPORTANT: Generate the content using these EXACT metadata markers:
+
+<!-- METADATA: {"type":"addContent"} -->
+<!-- METADATA: {"type":"objectType"} -->
+\`\`\`json
+[{ "title": "...", "slug": "...", "emoji": "...", "metafields": [...] }]
+\`\`\`
+
+<!-- METADATA: {"type":"demoObjects"} -->
+\`\`\`json
+[{ "type": "...", "title": "...", "status": "published", "metafields": [...] }]
+\`\`\`
+
+Generate complete, realistic content that matches what the code expects.` }],
+            });
+
+            // Use the streaming chat API
+            let fullResponse = '';
+            await api.streamingChat({
+              messages: contextMessages,
+              bucketSlug,
+              model,
+              maxTokens: 16000,
+              viewMode: 'content-model',
+              onChunk: (chunk) => {
+                fullResponse += chunk;
+              },
+            });
+
+            spinner.stop();
+
+            // Extract and install the content
+            const extractedContent = extractContentFromResponse(fullResponse);
+            if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
+              await installContentToCosmic(sdk, extractedContent, rl);
+            } else {
+              console.log(chalk.yellow('  No content metadata found in AI response.'));
+              console.log(chalk.dim('  Try being more specific: add content: [description]'));
+            }
+          } catch (err) {
+            spinner.stop();
+            console.log(chalk.red(`  Error generating content: ${(err as Error).message}`));
+          }
+          continue;
+        }
+
         if (!input) {
           continue;
         }
@@ -477,7 +1395,7 @@ export async function startChat(options: ChatOptions): Promise<void> {
  */
 function getSystemPrompt(bucketSlug: string): string {
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-  
+
   return `You are an AI assistant for Cosmic CMS, helping users manage content in their bucket "${bucketSlug}".
 
 Current date: ${today}
@@ -697,6 +1615,10 @@ ACTION: {"action": "install_content_model", "object_types": [
 - Do NOT list object types first - proceed directly with creation
 - Common types: blog-posts, posts, authors, categories, pages, products
 
+**REPOSITORIES:**
+19. LIST REPOSITORIES: {"action": "list_repositories"}
+20. DEPLOY REPOSITORY: {"action": "deploy_repository", "repository_id": "<id>"}
+
 For general questions or help, respond normally without any ACTION command.`;
 }
 
@@ -755,7 +1677,7 @@ async function askConfirmation(): Promise<boolean> {
   if (skipConfirmations) {
     return true;
   }
-  
+
   if (sharedAskLine) {
     try {
       const answer = await sharedAskLine(chalk.dim('[Y/n] '));
@@ -777,6 +1699,11 @@ async function executeAction(actionJson: string): Promise<string> {
   const sdk = getSDKClient();
   if (!sdk) {
     return 'Error: SDK not available';
+  }
+
+  const bucketSlug = getCurrentBucketSlug();
+  if (!bucketSlug) {
+    return 'Error: No bucket selected. Use "cosmic use" to set a bucket.';
   }
 
   try {
@@ -803,7 +1730,7 @@ async function executeAction(actionJson: string): Promise<string> {
 
         // Set flag to skip individual confirmations since we just confirmed the batch
         skipConfirmations = true;
-        
+
         // Return success - the actual creates will follow
         return `✓ Confirmed. Creating ${action.count} ${action.type}...`;
       }
@@ -830,28 +1757,28 @@ async function executeAction(actionJson: string): Promise<string> {
         }
 
         spinner.start('Creating...');
-        
+
         // Build insert payload per SDK docs
         const insertPayload: Record<string, unknown> = {
           type: action.type,
           title: action.title,
         };
-        
+
         // Add optional slug if provided
         if (action.slug) {
           insertPayload.slug = action.slug;
         }
-        
+
         // Add metadata if provided (metafield key:value pairs)
         if (action.metadata) {
           insertPayload.metadata = action.metadata;
         }
-        
+
         // Legacy support: if content is provided without metadata, use it
         if (action.content && !action.metadata) {
           insertPayload.metadata = { content: action.content };
         }
-        
+
         const result = await sdk.objects.insertOne(insertPayload);
         spinner.stop();
         return `✓ Created "${result.object.title}" (ID: ${result.object.id})`;
@@ -1388,7 +2315,7 @@ async function executeAction(actionJson: string): Promise<string> {
         }
 
         spinner.start('Creating object type...');
-        
+
         // Use SDK's objectTypes.insertOne() method
         // See: https://www.cosmicjs.com/docs/api/object-types#create-an-object-type
         const sdkClient = getSDKClient();
@@ -1396,17 +2323,17 @@ async function executeAction(actionJson: string): Promise<string> {
           spinner.stop();
           return 'Error: SDK client not available.';
         }
-        
+
         const objectTypeData: Record<string, unknown> = {
           title: action.title,
         };
-        
+
         // Add optional fields
         if (action.slug) objectTypeData.slug = action.slug;
         if (action.singular) objectTypeData.singular = action.singular;
         if (action.emoji) objectTypeData.emoji = action.emoji;
         if (action.singleton !== undefined) objectTypeData.singleton = action.singleton;
-        
+
         // Sanitize metafields - fix common AI mistakes
         if (action.metafields && Array.isArray(action.metafields)) {
           objectTypeData.metafields = action.metafields.map((field: Record<string, unknown>) => {
@@ -1418,7 +2345,7 @@ async function executeAction(actionJson: string): Promise<string> {
             return sanitized;
           });
         }
-        
+
         const result = await sdkClient.objectTypes.insertOne(objectTypeData);
         spinner.stop();
 
@@ -1442,13 +2369,13 @@ async function executeAction(actionJson: string): Promise<string> {
           console.log(chalk.yellow(`    • ${demoObjects.length} demo object(s)`));
         }
         console.log();
-        
+
         // List object types
         for (const ot of objectTypes) {
           const emoji = (ot.emoji as string) || '📄';
           console.log(chalk.yellow(`    ${emoji} ${ot.title}`));
         }
-        
+
         console.log();
         process.stdout.write(chalk.yellow(`  Proceed? `));
         const confirmed = await askConfirmation();
@@ -1469,22 +2396,28 @@ async function executeAction(actionJson: string): Promise<string> {
         // Track which demo objects were successfully created with their details
         const successfulObjects: Array<{ original: Record<string, unknown>; created: Record<string, unknown> }> = [];
 
-        // Step 1: Create all object types first
+        // Step 1: Create all object types first (streaming output)
         console.log();
         console.log(chalk.cyan('  Creating object types...'));
-        
+        console.log();
+
+        let typesCreated = 0;
+        let typesFailed = 0;
+
         for (const ot of objectTypes) {
-          spinner.start(`Creating ${ot.title}...`);
-          
+          const emoji = (ot.emoji as string) || '📄';
+          // Stream the "creating" status
+          process.stdout.write(chalk.dim(`  ${emoji} Creating "${ot.title}"...`));
+
           try {
             const objectTypeData: Record<string, unknown> = {
               title: ot.title,
             };
-            
+
             if (ot.slug) objectTypeData.slug = ot.slug;
             if (ot.singular) objectTypeData.singular = ot.singular;
             if (ot.emoji) objectTypeData.emoji = ot.emoji;
-            
+
             // Add IDs to metafields and sanitize
             if (ot.metafields && Array.isArray(ot.metafields)) {
               const metafieldsWithIds = addIdsToMetafields(ot.metafields as Record<string, unknown>[]);
@@ -1497,35 +2430,51 @@ async function executeAction(actionJson: string): Promise<string> {
                 return sanitized;
               });
             }
-            
+
             const result = await sdkClient.objectTypes.insertOne(objectTypeData);
-            spinner.stop();
-            
+
             const typeAny = result.object_type as Record<string, unknown>;
             const slug = typeAny.slug as string;
             createdObjectTypes.set(slug, typeAny);
-            
-            const emoji = (ot.emoji as string) || '✓';
-            console.log(chalk.green(`  ${emoji} Created "${typeAny.title}" (${slug})`));
+
+            // Clear line and show success
+            process.stdout.write('\r' + ' '.repeat(60) + '\r');
+            console.log(chalk.green(`  ${emoji} ${typeAny.title} `) + chalk.dim(`(${slug})`));
             results.push(`Created object type: ${typeAny.title}`);
+            typesCreated++;
           } catch (error) {
-            spinner.stop();
-            console.log(chalk.red(`  ✗ Failed to create "${ot.title}": ${(error as Error).message}`));
+            // Clear line and show error
+            process.stdout.write('\r' + ' '.repeat(60) + '\r');
+            console.log(chalk.red(`  ✗ ${ot.title}: ${(error as Error).message}`));
             results.push(`Failed: ${ot.title} - ${(error as Error).message}`);
+            typesFailed++;
           }
         }
 
-        // Step 2: Create demo objects if provided
+        // Show types summary
+        console.log();
+        if (typesCreated > 0) {
+          console.log(chalk.green(`  ✓ ${typesCreated} object type${typesCreated !== 1 ? 's' : ''} created`));
+        }
+        if (typesFailed > 0) {
+          console.log(chalk.red(`  ✗ ${typesFailed} failed`));
+        }
+
+        // Step 2: Create demo objects if provided (streaming output)
         if (demoObjects && demoObjects.length > 0) {
           console.log();
           console.log(chalk.cyan('  Creating demo content...'));
-          
+          console.log();
+
+          let objectsCreated = 0;
+          let objectsFailed = 0;
+
           // Sort demo objects: create objects without references first
           // (categories, authors before posts that reference them)
           const sortedDemoObjects = [...demoObjects].sort((a, b) => {
             const aType = createdObjectTypes.get(a.type as string);
             const bType = createdObjectTypes.get(b.type as string);
-            
+
             // Count object/objects references in metafields
             const countRefs = (ot: Record<string, unknown> | undefined) => {
               if (!ot?.metafields) return 0;
@@ -1533,142 +2482,215 @@ async function executeAction(actionJson: string): Promise<string> {
                 (m) => m.type === 'object' || m.type === 'objects'
               ).length;
             };
-            
+
             return countRefs(aType) - countRefs(bType);
           });
 
           for (const obj of sortedDemoObjects) {
             const typeSlug = obj.type as string;
             const objectType = createdObjectTypes.get(typeSlug);
-            
+
             if (!objectType) {
               console.log(chalk.yellow(`  ⚠ Skipping "${obj.title}" - object type "${typeSlug}" not found`));
               continue;
             }
-            
-            spinner.start(`Creating "${obj.title}"...`);
-            
+
+            // Stream the "creating" status
+            process.stdout.write(chalk.dim(`  📝 Creating "${obj.title}"...`));
+
             try {
               // Process Unsplash URLs in thumbnail and metadata
               const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
               await processUnsplashUrls(obj, sdkClient, metafields);
-              
+
               // Build the object data
               const insertPayload: Record<string, unknown> = {
                 type: typeSlug,
                 title: obj.title,
               };
-              
+
               if (obj.slug) insertPayload.slug = obj.slug;
               if (obj.thumbnail) insertPayload.thumbnail = obj.thumbnail;
-              
+
               // Process metadata - resolve object references
               if (obj.metadata && typeof obj.metadata === 'object') {
                 const metadata = { ...(obj.metadata as Record<string, unknown>) };
-                
+
                 // For now, we'll just use the metadata as-is
                 // Object references will be resolved by slug after all objects are created
                 insertPayload.metadata = metadata;
               }
-              
+
               const result = await sdkClient.objects.insertOne(insertPayload);
-              spinner.stop();
-              
+
               const createdObj = result.object as Record<string, unknown>;
               const actualSlug = createdObj.slug as string;
               const id = createdObj.id as string;
-              
+
               // Store for reference resolution - map multiple possible slugs to the ID
               createdObjects.set(actualSlug, id);
-              
+
               // Also map the expected slug (from AI) if different
               const expectedSlug = obj.slug as string;
               if (expectedSlug && expectedSlug !== actualSlug) {
                 createdObjects.set(expectedSlug, id);
               }
-              
+
               // Also map a slugified version of the title
               const titleSlug = (obj.title as string).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
               if (titleSlug && titleSlug !== actualSlug) {
                 createdObjects.set(titleSlug, id);
               }
-              
+
               // Track for reference resolution
               successfulObjects.push({ original: obj, created: createdObj });
-              
-              console.log(chalk.green(`  ✓ Created "${createdObj.title}" (${typeSlug})`));
+
+              // Clear line and show success
+              process.stdout.write('\r' + ' '.repeat(60) + '\r');
+              console.log(chalk.green(`  ✓ ${createdObj.title} `) + chalk.dim(`(${typeSlug})`));
               results.push(`Created object: ${createdObj.title}`);
+              objectsCreated++;
             } catch (error) {
-              spinner.stop();
-              console.log(chalk.red(`  ✗ Failed to create "${obj.title}": ${(error as Error).message}`));
+              // Clear line and show error
+              process.stdout.write('\r' + ' '.repeat(60) + '\r');
+              console.log(chalk.red(`  ✗ ${obj.title}: ${(error as Error).message}`));
               results.push(`Failed: ${obj.title} - ${(error as Error).message}`);
+              objectsFailed++;
             }
+          }
+
+          // Show objects summary
+          console.log();
+          if (objectsCreated > 0) {
+            console.log(chalk.green(`  ✓ ${objectsCreated} object${objectsCreated !== 1 ? 's' : ''} created`));
+          }
+          if (objectsFailed > 0) {
+            console.log(chalk.red(`  ✗ ${objectsFailed} failed`));
           }
 
           // Step 3: Resolve object references (update objects with proper IDs)
           if (successfulObjects.length > 0) {
-            console.log();
-            console.log(chalk.cyan('  Resolving references...'));
-            
-            for (const { original, created } of successfulObjects) {
+            const objectsWithRefs = successfulObjects.filter(({ original }) => {
               const typeSlug = original.type as string;
               const objectType = createdObjectTypes.get(typeSlug);
-              
-              if (!objectType || !original.metadata) continue;
-              
+              if (!objectType || !original.metadata) return false;
               const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
-              const refMetafields = metafields.filter(
-                (m) => m.type === 'object' || m.type === 'objects'
-              );
-              
-              if (refMetafields.length === 0) continue;
-              
-              const metadata = original.metadata as Record<string, unknown>;
-              const updates: Record<string, unknown> = {};
-              let hasUpdates = false;
-              
-              for (const metafield of refMetafields) {
-                const key = metafield.key as string;
-                const value = metadata[key];
-                
-                if (!value) continue;
-                
-                if (metafield.type === 'object' && typeof value === 'string') {
-                  // Single object reference - convert slug to ID
-                  const refId = createdObjects.get(value);
-                  if (refId) {
-                    updates[key] = refId;
-                    hasUpdates = true;
+              return metafields.some((m) => m.type === 'object' || m.type === 'objects');
+            });
+
+            if (objectsWithRefs.length > 0) {
+              console.log();
+              console.log(chalk.cyan('  Resolving references...'));
+
+              let refsUpdated = 0;
+              for (const { original, created } of objectsWithRefs) {
+                const typeSlug = original.type as string;
+                const objectType = createdObjectTypes.get(typeSlug);
+
+                if (!objectType || !original.metadata) continue;
+
+                const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
+                const refMetafields = metafields.filter(
+                  (m) => m.type === 'object' || m.type === 'objects'
+                );
+
+                if (refMetafields.length === 0) continue;
+
+                const metadata = original.metadata as Record<string, unknown>;
+                const updates: Record<string, unknown> = {};
+                let hasUpdates = false;
+
+                for (const metafield of refMetafields) {
+                  const key = metafield.key as string;
+                  const value = metadata[key];
+
+                  if (!value) continue;
+
+                  if (metafield.type === 'object' && typeof value === 'string') {
+                    // Single object reference - convert slug to ID
+                    const refId = createdObjects.get(value);
+                    if (refId) {
+                      updates[key] = refId;
+                      hasUpdates = true;
+                    }
+                  } else if (metafield.type === 'objects' && Array.isArray(value)) {
+                    // Multiple object references - convert slugs to IDs
+                    const refIds = value
+                      .map((slug: string) => createdObjects.get(slug))
+                      .filter(Boolean);
+                    if (refIds.length > 0) {
+                      updates[key] = refIds;
+                      hasUpdates = true;
+                    }
                   }
-                } else if (metafield.type === 'objects' && Array.isArray(value)) {
-                  // Multiple object references - convert slugs to IDs
-                  const refIds = value
-                    .map((slug: string) => createdObjects.get(slug))
-                    .filter(Boolean);
-                  if (refIds.length > 0) {
-                    updates[key] = refIds;
-                    hasUpdates = true;
+                }
+
+                if (hasUpdates) {
+                  const objId = created.id as string;
+                  const objTitle = created.title as string;
+
+                  try {
+                    await sdkClient.objects.updateOne(objId, { metadata: updates });
+                    refsUpdated++;
+                  } catch {
+                    console.log(chalk.yellow(`  ⚠ Could not update references for "${objTitle}"`));
                   }
                 }
               }
-              
-              if (hasUpdates) {
-                const objId = created.id as string;
-                const objTitle = created.title as string;
-                
-                try {
-                  await sdkClient.objects.updateOne(objId, { metadata: updates });
-                  console.log(chalk.dim(`  ✓ Updated references for "${objTitle}"`));
-                } catch (error) {
-                  console.log(chalk.yellow(`  ⚠ Could not update references for "${objTitle}"`));
-                }
+
+              if (refsUpdated > 0) {
+                console.log(chalk.dim(`  ✓ Updated ${refsUpdated} reference${refsUpdated !== 1 ? 's' : ''}`));
               }
             }
           }
         }
 
         console.log();
-        return `✓ Content model installed: ${objectTypes.length} object type(s)${demoObjects ? `, ${demoObjects.length} demo object(s)` : ''}`;
+        const totalTypes = createdObjectTypes.size;
+        const totalObjects = successfulObjects.length;
+        return `✓ Content model installed: ${totalTypes} object type${totalTypes !== 1 ? 's' : ''}${totalObjects > 0 ? `, ${totalObjects} object${totalObjects !== 1 ? 's' : ''}` : ''}`;
+      }
+
+      case 'list_repositories': {
+        const { repositories } = await api.listRepositories(bucketSlug);
+
+        if (repositories.length === 0) {
+          return 'No repositories connected. Use `cosmic repos connect` to add one.';
+        }
+
+        let result = `Found ${repositories.length} repository(ies):\n\n`;
+        for (const repo of repositories) {
+          result += `• ${repo.repository_name} (${repo.framework || 'other'})\n`;
+          result += `  ID: ${repo.id}\n`;
+          result += `  URL: ${repo.repository_url}\n`;
+          if (repo.production_url) {
+            result += `  Production: ${repo.production_url}\n`;
+          }
+          result += '\n';
+        }
+        return result;
+      }
+
+      case 'deploy_repository': {
+        const repositoryId = action.repository_id as string;
+        if (!repositoryId) {
+          return 'Error: deploy_repository requires repository_id.';
+        }
+
+        console.log();
+        console.log(chalk.yellow(`  Deploying repository...`));
+
+        const result = await api.deployRepository(bucketSlug, repositoryId);
+
+        if (!result.success) {
+          return 'Error: Failed to deploy repository';
+        }
+
+        let response = '✓ Deployment started';
+        if (result.deployment_url) {
+          response += `\n  URL: ${result.deployment_url}`;
+        }
+        return response;
       }
 
       default:
@@ -1693,8 +2715,7 @@ async function processMessage(
     throw new Error('SDK client not available. Check your bucket configuration.');
   }
 
-  // Don't use spinner - it interferes with readline
-  console.log(chalk.dim('  Thinking...'));
+  // Regular chat now uses streaming, but build/repo modes have their own status messages
 
   try {
     // Build messages for the SDK with system prompt
@@ -1711,38 +2732,364 @@ async function processMessage(
     const verbose = process.env.COSMIC_DEBUG === '1' || process.env.COSMIC_DEBUG === '2';
     if (verbose) {
       const { bucketSlug: sdkBucket, readKey, writeKey } = getBucketKeys();
-      
+
       console.log(chalk.dim('  [DEBUG] SDK Configuration:'));
       console.log(chalk.dim(`    Bucket Slug: ${sdkBucket}`));
       console.log(chalk.dim(`    Read Key: ${readKey ? readKey.substring(0, 8) + '...' : 'NOT SET'}`));
       console.log(chalk.dim(`    Write Key: ${writeKey ? writeKey.substring(0, 8) + '...' : 'NOT SET'}`));
       console.log(chalk.dim(`    API Environment: ${getApiEnv()}`));
-      
+
       console.log(chalk.dim('  [DEBUG] Request Payload:'));
       console.log(chalk.dim(`    Model: ${model}`));
-      console.log(chalk.dim(`    Max Tokens: 4096`));
+      console.log(chalk.dim(`    Max Tokens: ${isBuildMode ? '32000' : '16384'}${isBuildMode ? ' (build mode, streaming)' : ''}`));
       console.log(chalk.dim(`    Messages Count: ${messagesWithSystem.length}`));
       console.log(chalk.dim(`    System prompt length: ${systemPrompt.length} chars`));
       console.log(chalk.dim(`    User message: "${conversationHistory[0]?.content?.substring(0, 100)}${(conversationHistory[0]?.content?.length || 0) > 100 ? '...' : ''}"`));
       console.log(chalk.dim(`    Total payload size: ${JSON.stringify(messagesWithSystem).length} chars`));
-      
+
       // Show more details if COSMIC_DEBUG=2
       if (process.env.COSMIC_DEBUG === '2') {
         console.log(chalk.dim('  [DEBUG] System prompt preview (first 500 chars):'));
         console.log(chalk.dim('    ' + systemPrompt.substring(0, 500).replace(/\n/g, '\n    ') + '...'));
-        console.log(chalk.dim('  [DEBUG] Full SDK generateText call:'));
-        console.log(chalk.dim('    ' + JSON.stringify({ model, max_tokens: 4096, messagesCount: messagesWithSystem.length })));
+        console.log(chalk.dim(`  [DEBUG] Full SDK ${isBuildMode ? 'stream' : 'generateText'} call:`));
+        console.log(chalk.dim('    ' + JSON.stringify({ model, max_tokens: isBuildMode ? 32000 : 16384, stream: isBuildMode, messagesCount: messagesWithSystem.length })));
       }
     }
 
     // Use SDK to generate text
-    let response;
+    // In build mode: use Dashboard API with build-app prompt (streaming, 32000 tokens)
+    // In normal mode: use SDK API with 16384 tokens for faster responses
+    const maxTokens = isBuildMode ? 32000 : 16384;
+
+    let response: { text: string; usage?: { input_tokens: number; output_tokens: number }; messageId?: string };
+
     try {
-      response = await sdk.ai.generateText({
-        messages: messagesWithSystem,
-        model,
-        max_tokens: 4096,
-      });
+      if (isBuildMode) {
+        // Use Dashboard API for build mode - this uses the backend's sophisticated build-app prompt
+        // Fetch object types so the AI knows the bucket's content structure
+        let objectTypeSlugs: string[] = [];
+        try {
+          const objectTypes = await api.listObjectTypes(bucketSlug);
+          objectTypeSlugs = objectTypes.map((ot: { slug: string }) => ot.slug);
+          if (verbose) {
+            console.log(chalk.dim(`  [DEBUG] Found ${objectTypeSlugs.length} object types: ${objectTypeSlugs.join(', ')}`));
+          }
+        } catch (err) {
+          // Continue without object types if fetch fails
+          if (verbose) {
+            console.log(chalk.dim(`  [DEBUG] Could not fetch object types: ${(err as Error).message}`));
+          }
+        }
+
+        spinner.stop();
+        console.log(chalk.dim('  Generating app...'));
+        console.log();
+
+        // Convert messages to Dashboard API format (content as array)
+        const dashboardMessages = conversationHistory.map((msg) => ({
+          role: msg.role as 'user' | 'assistant',
+          content: [{ type: 'text' as const, text: msg.content }],
+        }));
+
+        // Track file progress during streaming
+        let fileCount = 0;
+        let currentFile = '';
+        let fullText = '';
+        let isGeneratingFiles = false;
+        let lastPrintedLength = 0;
+
+        const result = await api.streamingChat({
+          messages: dashboardMessages,
+          bucketSlug,
+          model,
+          maxTokens,
+          viewMode: 'build-app',
+          selectedObjectTypes: objectTypeSlugs, // Include bucket's object types for context
+          onChunk: (chunk) => {
+            fullText += chunk;
+
+            // Detect new file being generated (look for ```lang\n// path/to/file patterns)
+            const fileStartMatch = fullText.match(/```\w*\n\/\/\s*([^\n]+)/g);
+            if (fileStartMatch && fileStartMatch.length > fileCount) {
+              // New file detected - switch to file progress mode
+              if (!isGeneratingFiles) {
+                isGeneratingFiles = true;
+                console.log(); // New line before file list
+              }
+
+              const lastMatch = fileStartMatch[fileStartMatch.length - 1];
+              const fileNameMatch = lastMatch.match(/\/\/\s*(.+)/);
+              if (fileNameMatch) {
+                const newFile = fileNameMatch[1].trim();
+                if (newFile !== currentFile) {
+                  currentFile = newFile;
+                  fileCount = fileStartMatch.length;
+
+                  // Show the file being generated
+                  process.stdout.write(`\r${' '.repeat(60)}\r`); // Clear line
+                  console.log(chalk.dim(`  📄 ${newFile}`));
+                }
+              }
+            } else if (!isGeneratingFiles) {
+              // Not generating files yet - stream the text response in real-time
+              // Only print the new content since last print
+              const newContent = fullText.slice(lastPrintedLength);
+              if (newContent) {
+                process.stdout.write(newContent);
+                lastPrintedLength = fullText.length;
+              }
+            }
+          },
+          onProgress: (progress) => {
+            if (verbose && progress.message) {
+              console.log(chalk.dim(`  [PROGRESS] ${progress.stage}: ${progress.message}`));
+            }
+          },
+        });
+
+        // Track if we already streamed the text (for non-file responses)
+        const alreadyStreamedText = !isGeneratingFiles && lastPrintedLength > 0;
+
+        // Add newline after streaming text if we weren't generating files
+        if (alreadyStreamedText) {
+          console.log();
+          console.log();
+        }
+
+        // Show summary if files were generated
+        if (fileCount > 0) {
+          console.log();
+          console.log(chalk.green(`  ✓ Generated ${fileCount} file(s)`));
+        }
+
+        response = {
+          text: result.text,
+          messageId: result.messageId,
+          usage: undefined, // Dashboard API doesn't return usage in same format
+          _alreadyStreamed: alreadyStreamedText, // Flag to skip duplicate display
+        };
+      } else if (isRepoMode && currentRepo) {
+        // Use streamingRepositoryUpdate for repository update mode
+        spinner.stop();
+        console.log(chalk.dim('  Analyzing and updating repository...'));
+
+        // Convert messages to the format expected by streamingRepositoryUpdate
+        const repoMessages = conversationHistory.map((msg) => ({
+          role: msg.role as 'user' | 'assistant',
+          content: msg.content,
+        }));
+
+        // Track progress during streaming
+        let fullText = '';
+        let lastPrintedLength = 0;
+        let fileCount = 0;
+        let currentFile = '';
+        let isEditingFiles = false;
+
+        const result = await streamingRepositoryUpdate({
+          repositoryOwner: currentRepo.owner,
+          repositoryName: currentRepo.name,
+          repositoryId: currentRepo.id,
+          bucketSlug,
+          messages: repoMessages,
+          branch: currentRepo.branch,
+          model,
+          maxTokens: 32000,
+          onChunk: (chunk) => {
+            // Skip empty chunks
+            if (!chunk) return;
+
+            fullText += chunk;
+
+            // Debug: log raw chunks if COSMIC_DEBUG=2
+            if (process.env.COSMIC_DEBUG === '2') {
+              console.log(chalk.dim(`[CHUNK] "${chunk.replace(/\n/g, '\\n')}"`));
+            }
+
+            // Detect file edits (look for patterns like "## Editing file:" or ```diff patterns)
+            const fileEditMatch = fullText.match(/(?:##\s*(?:Editing|Creating|Modifying|Updating)\s*(?:file:?)?\s*`?([^`\n]+)`?|```(?:diff|typescript|javascript|tsx|jsx)\s*\n\/\/\s*([^\n]+))/gi);
+            if (fileEditMatch && fileEditMatch.length > fileCount) {
+              if (!isEditingFiles) {
+                isEditingFiles = true;
+              }
+
+              const lastMatch = fileEditMatch[fileEditMatch.length - 1];
+              // Extract filename from various patterns
+              let newFile = '';
+              const headerMatch = lastMatch.match(/(?:Editing|Creating|Modifying|Updating)\s*(?:file:?)?\s*`?([^`\n]+)`?/i);
+              const commentMatch = lastMatch.match(/\/\/\s*(.+)/);
+
+              if (headerMatch) {
+                newFile = headerMatch[1].trim();
+              } else if (commentMatch) {
+                newFile = commentMatch[1].trim();
+              }
+
+              if (newFile && newFile !== currentFile) {
+                currentFile = newFile;
+                fileCount = fileEditMatch.length;
+                console.log(chalk.dim(`  📝 ${newFile}`));
+              }
+            } else if (!isEditingFiles) {
+              // Stream the text response in real-time
+              const newContent = fullText.slice(lastPrintedLength);
+              if (newContent) {
+                // Replace excessive newlines with max 2
+                const cleanContent = newContent.replace(/\n{2,}/g, '\n');
+                if (cleanContent.trim() || (cleanContent === '\n' && lastPrintedLength > 0)) {
+                  process.stdout.write(cleanContent.trim() ? cleanContent : '');
+                }
+                lastPrintedLength = fullText.length;
+              }
+            }
+          },
+          onProgress: (progress) => {
+            if (verbose && progress.message) {
+              console.log(chalk.dim(`  [PROGRESS] ${progress.stage}: ${progress.message}`));
+            }
+            // Show commit progress
+            if (progress.stage === 'committing' || progress.stage === 'pushing') {
+              process.stdout.write(`\r${' '.repeat(60)}\r`);
+              console.log(chalk.dim(`  🔄 ${progress.message || progress.stage}...`));
+            }
+          },
+        });
+
+        // Track if we already streamed the text
+        const alreadyStreamedText = !isEditingFiles && lastPrintedLength > 0;
+
+        if (alreadyStreamedText) {
+          console.log(); // Single newline after streamed content
+        }
+
+        // Show summary
+        if (fileCount > 0) {
+          console.log(chalk.green(`  ✓ Updated ${fileCount} file(s)`));
+          console.log(chalk.dim(`  Changes pushed to ${currentRepo.owner}/${currentRepo.name}`));
+        }
+
+        response = {
+          text: result.text,
+          messageId: result.requestId,
+          usage: undefined,
+          _alreadyStreamed: alreadyStreamedText,
+        };
+
+        // Always poll for deployment status after repo update
+        // (The AI pushes changes automatically, so check for deployment)
+        console.log();
+        console.log(chalk.yellow('  Checking for Vercel deployment...'));
+
+        // Give Vercel a moment to detect the push
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Poll deployment status (will show in real-time)
+        try {
+          const deployResult = await pollDeploymentStatus(
+            bucketSlug,
+            currentRepo.name, // Use repo name as vercel project ID
+            `https://github.com/${currentRepo.owner}/${currentRepo.name}`
+          );
+
+          // pollDeploymentStatus already shows success message and "open" hint
+          // Just handle the case where it returns failure (error already displayed by pollDeploymentStatus)
+          if (!deployResult.success && !deployResult.error) {
+            // Timeout or other non-error failure
+            console.log(chalk.dim('  Deployment is still in progress. Check Vercel dashboard for status.'));
+          }
+        } catch (err) {
+          // Deployment polling failed - not critical, repo update succeeded
+          if (verbose) {
+            console.log(chalk.dim(`  [DEBUG] Deployment poll error: ${(err as Error).message}`));
+          }
+          console.log(chalk.dim('  Could not check deployment status. Changes were pushed to the repository.'));
+        }
+
+        // Check if AI response contains content to add to Cosmic CMS
+        const extractedContent = extractContentFromResponse(fullText);
+        if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
+          await installContentToCosmic(sdk, extractedContent, rl);
+        } else {
+          // Check if AI mentioned Cosmic content but didn't include metadata markers
+          // This happens when AI explains what needs to be done but doesn't generate the content
+          const cosmicContentMentioned = detectCosmicContentMention(fullText);
+          if (cosmicContentMentioned) {
+            // Offer to generate the content
+            await offerContentGeneration(sdk, fullText, conversationHistory, model, bucketSlug, rl);
+          }
+        }
+      } else {
+        // Use streaming for regular chat (replaces "Thinking..." with real-time output)
+        console.log(); // New line before streaming output
+        
+        // Convert messages to the format expected by streamingChat
+        const dashboardMessages = conversationHistory.map((msg) => ({
+          role: msg.role as 'user' | 'assistant',
+          content: [{ type: 'text' as const, text: msg.content }],
+        }));
+        
+        let fullText = '';
+        let lastPrintedLength = 0;
+        let isInsideAction = false;
+        
+        const result = await api.streamingChat({
+          messages: dashboardMessages,
+          bucketSlug,
+          model,
+          maxTokens,
+          viewMode: 'content-model', // Use content-model view mode for regular chat
+          onChunk: (chunk) => {
+            fullText += chunk;
+            
+            // Detect when we enter an ACTION: block (don't stream the JSON)
+            if (!isInsideAction) {
+              const actionIndex = fullText.indexOf('ACTION:');
+              if (actionIndex !== -1 && actionIndex >= lastPrintedLength) {
+                // Print everything before ACTION:
+                const beforeAction = fullText.slice(lastPrintedLength, actionIndex);
+                if (beforeAction) {
+                  process.stdout.write(beforeAction);
+                }
+                isInsideAction = true;
+                lastPrintedLength = fullText.length;
+                return;
+              }
+            }
+            
+            // Skip streaming while inside ACTION block
+            if (isInsideAction) {
+              return;
+            }
+            
+            // Stream the text response in real-time
+            const newContent = fullText.slice(lastPrintedLength);
+            if (newContent) {
+              process.stdout.write(newContent);
+              lastPrintedLength = fullText.length;
+            }
+          },
+        });
+        
+        // Track if we already streamed the text
+        const alreadyStreamedText = lastPrintedLength > 0 && !isInsideAction;
+        
+        if (alreadyStreamedText || isInsideAction) {
+          console.log(); // New line after streamed content
+        }
+        
+        response = {
+          text: result.text,
+          messageId: result.messageId,
+          usage: undefined,
+          _alreadyStreamed: alreadyStreamedText,
+        };
+        
+        // Check if AI response contains content to add to Cosmic CMS (metadata marker format)
+        const extractedContent = extractContentFromResponse(fullText);
+        if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
+          await installContentToCosmic(sdk, extractedContent, rl);
+        }
+      }
     } catch (apiError) {
       const err = apiError as Error & { response?: { data?: unknown }; cause?: unknown };
 
@@ -1785,26 +3132,117 @@ async function processMessage(
     // Print assistant response
     if (response.text) {
       // Check for ACTION commands in the response
-      const lines = response.text.split('\n');
+      // Support multi-line JSON by extracting the full JSON object
       let displayText = '';
       let actionResults: string[] = [];
-
       let actionExecuted = false;
-      for (const line of lines) {
-        if (line.trim().startsWith('ACTION:') && !actionExecuted) {
-          const actionJson = line.replace('ACTION:', '').trim();
-          const result = await executeAction(actionJson);
-          actionResults.push(result);
-          actionExecuted = true; // Only execute one action per response
-        } else if (!line.trim().startsWith('ACTION:')) {
-          displayText += line + '\n';
+      
+      // Find ACTION: in the response and extract the full JSON
+      const actionIndex = response.text.indexOf('ACTION:');
+      if (actionIndex !== -1 && !actionExecuted) {
+        // Extract JSON starting after "ACTION:"
+        const afterAction = response.text.substring(actionIndex + 7).trim();
+        
+        // Find the start of JSON (first { or [)
+        const jsonStartIndex = afterAction.search(/[{[]/);
+        if (jsonStartIndex !== -1) {
+          const jsonStart = afterAction.substring(jsonStartIndex);
+          
+          // Use brace matching to find the complete JSON object
+          let braceCount = 0;
+          let bracketCount = 0;
+          let inString = false;
+          let escapeNext = false;
+          let jsonEndIndex = -1;
+          
+          for (let i = 0; i < jsonStart.length; i++) {
+            const char = jsonStart[i];
+            
+            if (escapeNext) {
+              escapeNext = false;
+              continue;
+            }
+            
+            if (char === '\\' && inString) {
+              escapeNext = true;
+              continue;
+            }
+            
+            if (char === '"') {
+              inString = !inString;
+              continue;
+            }
+            
+            if (!inString) {
+              if (char === '{') braceCount++;
+              if (char === '}') braceCount--;
+              if (char === '[') bracketCount++;
+              if (char === ']') bracketCount--;
+              
+              if (braceCount === 0 && bracketCount === 0 && (char === '}' || char === ']')) {
+                jsonEndIndex = i + 1;
+                break;
+              }
+            }
+          }
+          
+          if (jsonEndIndex !== -1) {
+            const actionJson = jsonStart.substring(0, jsonEndIndex);
+            const result = await executeAction(actionJson);
+            actionResults.push(result);
+            actionExecuted = true;
+            
+            // Build displayText excluding the ACTION: line and its JSON content
+            // Find where the JSON ends in the original response
+            const actionEndInOriginal = actionIndex + 7 + jsonStartIndex + jsonEndIndex;
+            displayText = response.text.substring(0, actionIndex) + response.text.substring(actionEndInOriginal);
+          } else {
+            // Fallback: couldn't find complete JSON, try single-line parsing
+            const firstLine = afterAction.split('\n')[0];
+            try {
+              const result = await executeAction(firstLine);
+              actionResults.push(result);
+              actionExecuted = true;
+            } catch {
+              // JSON parsing failed
+              actionResults.push(`Error: Could not parse ACTION JSON - ${(firstLine || '').substring(0, 100)}...`);
+            }
+            // Exclude the ACTION line from display
+            displayText = response.text.split('\n').filter(line => !line.trim().startsWith('ACTION:')).join('\n');
+          }
+        } else {
+          // No JSON found after ACTION:
+          displayText = response.text.split('\n').filter(line => !line.trim().startsWith('ACTION:')).join('\n');
         }
+      } else {
+        // No ACTION: found, display all text
+        displayText = response.text;
       }
 
+      // Check for app build completion (FRAMEWORK and APP_NAME markers)
+      const appMetadata = extractAppMetadata(response.text);
+      const buildFiles = appMetadata.framework && appMetadata.appName ? parseCodeBlocks(response.text) : {};
+      const buildFileCount = Object.keys(buildFiles).length;
+      const isAppBuild = buildFileCount > 0;
+
       // Print the response text (without ACTION lines)
-      if (displayText.trim()) {
+      // In build mode with files, we skip showing all the code content
+      // Also skip if we already streamed the text in build mode
+      const alreadyStreamed = (response as { _alreadyStreamed?: boolean })._alreadyStreamed;
+      if (displayText.trim() && !isAppBuild && !alreadyStreamed) {
         console.log();
         console.log(formatResponse(displayText.trim()));
+      } else if (isAppBuild) {
+        // In build mode, just show a brief intro if there's text before the code
+        const introText = displayText.split('```')[0].trim();
+        if (introText && introText.length > 10) {
+          console.log();
+          // Only show first paragraph or so
+          const firstParagraph = introText.split('\n\n')[0];
+          if (firstParagraph) {
+            console.log(formatResponse(firstParagraph));
+          }
+        }
       }
 
       // Print action results
@@ -1814,6 +3252,211 @@ async function processMessage(
       }
 
       console.log();
+
+      // Handle app build completion
+      if (isAppBuild) {
+        console.log();
+        console.log(chalk.cyan(`  🚀 App Generated: ${appMetadata.appName}`));
+        console.log(chalk.dim(`     Framework: ${appMetadata.framework}`));
+        console.log(chalk.dim(`     Files: ${buildFileCount}`));
+        console.log();
+
+        // List first few files (if not already shown during streaming)
+        const fileNames = Object.keys(buildFiles);
+        const filesToShow = fileNames.slice(0, 5);
+        for (const fileName of filesToShow) {
+          console.log(chalk.dim(`     📄 ${fileName}`));
+        }
+        if (fileNames.length > 5) {
+          console.log(chalk.dim(`     ... and ${fileNames.length - 5} more files`));
+        }
+        console.log();
+
+        // Prompt for deployment options using the shared input function
+        try {
+          const defaultName = appMetadata.appName;
+          let repoName = '';
+
+          // Loop until we have an available repo name
+          while (true) {
+            const repoNameInput = await sharedAskLine!(chalk.yellow(`  Repository name [${defaultName}]: `));
+            repoName = repoNameInput.trim() || defaultName;
+
+            // Convert to slug format (lowercase, hyphens)
+            const repoSlug = repoName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+
+            // Check repo availability
+            console.log(chalk.dim(`  Checking availability...`));
+            try {
+              const availability = await api.checkRepoAvailability(repoSlug);
+
+              if (availability.github_repository?.available) {
+                repoName = repoSlug;
+                console.log(chalk.green(`  ✓ Repository name "${repoSlug}" is available`));
+                break;
+              } else {
+                console.log(chalk.yellow(`  ✗ ${availability.github_repository?.message || 'Repository name not available'}`));
+
+                // Show suggestions if available
+                if (availability.github_repository?.suggestions && availability.github_repository.suggestions.length > 0) {
+                  console.log(chalk.dim(`  Suggestions: ${availability.github_repository.suggestions.join(', ')}`));
+                }
+                console.log();
+                // Loop back to ask for a new name
+              }
+            } catch (checkError) {
+              // If check fails, proceed anyway and let deploy handle it
+              if (verbose) {
+                console.log(chalk.dim(`  [DEBUG] Availability check failed: ${(checkError as Error).message}`));
+              }
+              repoName = repoSlug;
+              break;
+            }
+          }
+
+          const privateInput = await sharedAskLine!(chalk.yellow(`  Private repository? [y/N]: `));
+          const isPrivate = privateInput.toLowerCase() === 'y';
+
+          const deployInput = await sharedAskLine!(chalk.yellow(`  Deploy to Vercel? [Y/n]: `));
+          const shouldDeploy = deployInput.toLowerCase() !== 'n';
+
+          console.log();
+          console.log(chalk.yellow(`  Creating repository and deploying...`));
+
+          // Call the deploy API - use message_id if available from Dashboard API
+          const result = await api.deployAIApp({
+            platform: 'github',
+            web_platform: shouldDeploy ? 'vercel' : undefined,
+            framework: appMetadata.framework,
+            name: repoName,
+            ai_response: response.text,
+            message_id: response.messageId, // Use message_id from Dashboard API if available
+            private: isPrivate,
+            slug: bucketSlug,
+          });
+
+          console.log();
+          if (result.success) {
+            const repositoryUrl = result.data?.repositoryUrl || result.data?.repository_url;
+            if (repositoryUrl) {
+              console.log(chalk.green(`  ✓ Repository created: ${repositoryUrl}`));
+            }
+
+            // Debug log the deploy result
+            const verbose = process.env.COSMIC_DEBUG === '1' || process.env.COSMIC_DEBUG === '2';
+            if (verbose) {
+              console.log(`[DEBUG] Deploy result: ${JSON.stringify(result.data, null, 2)}`);
+            }
+
+            // If deployed to Vercel, poll for status
+            if (shouldDeploy) {
+              // Use vercel_project_id if available, otherwise the backend will look it up
+              const vercelProjectId = result.data?.vercel_project_id || '';
+              const repositoryId = result.data?.repository_id;
+              if (verbose) {
+                console.log(`[DEBUG] Polling with vercelProjectId: "${vercelProjectId}" (empty = backend will look up)`);
+              }
+              const deployResult = await pollDeploymentStatus(
+                bucketSlug,
+                vercelProjectId,
+                repositoryUrl
+              );
+
+              // If deployment failed and we have logs, offer to fix with AI
+              if (!deployResult.success && deployResult.logs && deployResult.logs.length > 0 && repositoryUrl) {
+                // Extract repo owner and name from URL (e.g., https://github.com/cosmic-community/my-app)
+                const urlParts = repositoryUrl.replace('https://github.com/', '').split('/');
+                const repoOwner = urlParts[0] || 'cosmic-community';
+                const repoNameFromUrl = urlParts[1] || repoName;
+
+                console.log();
+                console.log(chalk.yellow('  Would you like AI to analyze the logs and fix the build error?'));
+                const fixInput = await sharedAskLine!(chalk.yellow('  Fix with AI? [Y/n]: '));
+                const fixWithAI = fixInput.toLowerCase() !== 'n';
+
+                if (fixWithAI) {
+                  console.log();
+                  console.log(chalk.cyan('  Sending build logs to AI for analysis...'));
+                  console.log();
+
+                  // Format logs as text for the AI
+                  const logsText = deployResult.logs
+                    .map(log => `[${log.type}] ${log.text}`)
+                    .join('\n');
+
+                  const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText}\n\`\`\``;
+
+                  try {
+                    await streamingRepositoryUpdate({
+                      repositoryOwner: repoOwner,
+                      repositoryName: repoNameFromUrl,
+                      repositoryId,
+                      bucketSlug,
+                      messages: [{
+                        role: 'user',
+                        content: [{ type: 'text', text: userMessage }],
+                      }],
+                      onChunk: (chunk) => {
+                        process.stdout.write(chunk);
+                      },
+                      onComplete: () => {
+                        console.log();
+                        console.log();
+                        console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                        console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
+                        console.log();
+                      },
+                      onError: (error) => {
+                        console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                        console.log();
+                      },
+                    });
+
+                    // Wait a moment for Vercel to pick up the new commit, then poll again
+                    console.log(chalk.dim('  Waiting for new deployment to start...'));
+                    await new Promise(resolve => setTimeout(resolve, 10000));
+
+                    // Poll for the new deployment
+                    await pollDeploymentStatus(bucketSlug, vercelProjectId, repositoryUrl);
+                  } catch (aiError) {
+                    console.log(chalk.red(`  ✗ Failed to fix with AI: ${(aiError as Error).message}`));
+                    console.log();
+                  }
+                }
+              }
+
+              // Check if AI response contains content to add to Cosmic CMS (build mode)
+              const extractedContent = extractContentFromResponse(response.text);
+              if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
+                await installContentToCosmic(sdk, extractedContent, rl);
+              }
+            } else {
+              // No Vercel deployment requested
+              console.log();
+              console.log(chalk.green(`  ✓ App "${repoName}" created successfully!`));
+              console.log();
+              if (repositoryUrl) {
+                console.log(chalk.dim('  Next steps:'));
+                console.log(chalk.dim(`  1. Clone your repo: git clone ${repositoryUrl}`));
+                console.log(chalk.dim(`  2. Run locally: cd ${repositoryUrl.split('/').pop()} && npm install && npm run dev`));
+                console.log();
+              }
+
+              // Check if AI response contains content to add to Cosmic CMS (build mode - no deploy)
+              const extractedContent = extractContentFromResponse(response.text);
+              if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
+                await installContentToCosmic(sdk, extractedContent, rl);
+              }
+            }
+          } else {
+            console.log(chalk.red(`  ✗ Deployment failed: ${result.error || 'Unknown error'}`));
+            console.log();
+          }
+        } catch (deployError) {
+          console.log(chalk.red(`  ✗ Deployment error: ${(deployError as Error).message}`));
+          console.log();
+        }
+      }
 
       // Add to history (include action results)
       const fullResponse = actionResults.length > 0
@@ -1836,7 +3479,7 @@ async function processMessage(
             role: 'user',
             content: 'Continue with the next item if there are more to create. If all items are done, say "All done!"',
           });
-          
+
           // Return true to signal the caller to continue processing
           return true;
         }
@@ -1844,14 +3487,14 @@ async function processMessage(
     }
 
     // Show token usage
-    if (response.usage) {
+    if (response.usage && (response.usage.input_tokens || response.usage.output_tokens)) {
       console.log(
         chalk.dim(
-          `  [${response.usage.input_tokens} in / ${response.usage.output_tokens} out tokens]`
+          `  [${response.usage.input_tokens || '?'} in / ${response.usage.output_tokens || '?'} out tokens]`
         )
       );
     }
-    
+
     return false; // No continuation needed
   } catch (error) {
     spinner.fail();
@@ -1884,11 +3527,25 @@ function formatResponse(text: string): string {
  */
 function printHeader(model: string): void {
   console.log();
-  console.log(chalk.bold.cyan('  Cosmic Chat'));
+  if (isRepoMode && currentRepo) {
+    console.log(chalk.bold.magenta('  Cosmic Chat - Repository Mode'));
+    console.log(chalk.dim(`  Repository: `) + chalk.cyan(`${currentRepo.owner}/${currentRepo.name}`));
+    console.log(chalk.dim(`  Branch: ${currentRepo.branch}`));
+  } else if (isBuildMode) {
+    console.log(chalk.bold.green('  Cosmic Chat - Build Mode'));
+  } else {
+    console.log(chalk.bold.cyan('  Cosmic Chat'));
+  }
   console.log(chalk.dim(`  Model: ${model}`));
   console.log(chalk.dim(`  Context: ${formatContext()}`));
   console.log();
-  console.log(chalk.dim('  Type your message and press Enter. Type "help" for commands.'));
+  if (isRepoMode) {
+    console.log(chalk.dim('  Describe the changes you want to make. AI will edit and commit.'));
+  } else {
+    console.log(chalk.dim('  Type your message and press Enter. Type "help" for commands.'));
+    console.log(chalk.dim('  To build & deploy an app, run: ') + chalk.cyan('cosmic chat --build'));
+    console.log(chalk.dim('  To update existing code, run: ') + chalk.cyan('cosmic chat --repo'));
+  }
   console.log();
 }
 
@@ -1898,19 +3555,41 @@ function printHeader(model: string): void {
 function printHelp(): void {
   console.log();
   console.log(chalk.bold('Chat Commands:'));
-  console.log(chalk.dim('  exit, quit') + '  - Exit the chat');
-  console.log(chalk.dim('  clear') + '       - Clear conversation history');
-  console.log(chalk.dim('  context') + '     - Show current context');
-  console.log(chalk.dim('  help') + '        - Show this help');
+  console.log(chalk.dim('  exit, quit') + '    - Exit the chat');
+  console.log(chalk.dim('  clear') + '         - Clear conversation history');
+  console.log(chalk.dim('  context') + '       - Show current context');
+  console.log(chalk.dim('  open') + '          - Open last deployment in browser');
+  console.log(chalk.dim('  add content') + '   - Generate and add content to Cosmic CMS');
+  console.log(chalk.dim('  help') + '          - Show this help');
   console.log();
-  console.log(chalk.bold('Example prompts:'));
-  console.log(chalk.dim('  "List all authors"'));
-  console.log(chalk.dim('  "Create a new post titled Hello World"'));
-  console.log(chalk.dim('  "Add an author named John Doe"'));
-  console.log(chalk.dim('  "Show me the posts"'));
-  console.log(chalk.dim('  "Write a blog post about AI and save it"'));
-  console.log();
-  console.log(chalk.dim('  Actions require confirmation before executing.'));
+
+  if (isRepoMode) {
+    console.log(chalk.bold('Repository Update Mode:'));
+    console.log(chalk.dim('  You are in repository update mode. Describe the changes you want.'));
+    console.log();
+    console.log(chalk.bold('Example prompts:'));
+    console.log(chalk.dim('  "Add a dark mode toggle to the header"'));
+    console.log(chalk.dim('  "Fix the broken image on the homepage"'));
+    console.log(chalk.dim('  "Add a contact form component"'));
+    console.log(chalk.dim('  "Update the footer with new social links"'));
+  } else {
+    console.log(chalk.bold('Example prompts:'));
+    console.log(chalk.dim('  "List all authors"'));
+    console.log(chalk.dim('  "Create a new post titled Hello World"'));
+    console.log(chalk.dim('  "Add an author named John Doe"'));
+    console.log(chalk.dim('  "Show me the posts"'));
+    console.log(chalk.dim('  "Write a blog post about AI and save it"'));
+    console.log();
+    console.log(chalk.dim('  Actions require confirmation before executing.'));
+    console.log();
+    console.log(chalk.bold('Build & Deploy:'));
+    console.log(chalk.dim('  To generate and deploy a complete app, exit and run:'));
+    console.log(chalk.cyan('  cosmic chat --build'));
+    console.log();
+    console.log(chalk.bold('Update Code:'));
+    console.log(chalk.dim('  To update an existing repository with AI, exit and run:'));
+    console.log(chalk.cyan('  cosmic chat --repo'));
+  }
   console.log();
 }
 

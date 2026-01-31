@@ -108,7 +108,7 @@ async function getAgent(
 }
 
 /**
- * Create agent
+ * Create agent with interactive flow for repository agents
  */
 async function createAgent(options: {
   name?: string;
@@ -123,8 +123,11 @@ async function createAgent(options: {
   emailNotifications?: boolean;
   requireApproval?: boolean;
   json?: boolean;
+  interactive?: boolean;
+  run?: boolean;
 }): Promise<void> {
   const bucketSlug = requireBucket();
+  const isRepository = options.type === 'repository';
 
   // Get name if not provided
   const name =
@@ -134,11 +137,60 @@ async function createAgent(options: {
       required: true,
     }));
 
+  // For repository agents, interactive selection of repo and branch
+  let repositoryId = options.repositoryId;
+  let baseBranch = options.baseBranch;
+
+  if (isRepository && !repositoryId) {
+    // List repositories and let user select
+    spinner.start('Loading repositories...');
+    const { repositories } = await api.listRepositories(bucketSlug);
+    spinner.stop();
+
+    if (repositories.length === 0) {
+      display.error('No repositories connected');
+      display.info(`Connect a repository first: ${chalk.cyan('cosmic repos connect')}`);
+      process.exit(1);
+    }
+
+    const repoChoices = repositories.map((repo) => ({
+      name: repo.id,
+      message: `${repo.repository_name} (${repo.framework || 'other'})`,
+    }));
+
+    repositoryId = await prompts.select({
+      message: 'Select repository:',
+      choices: repoChoices,
+    });
+
+    // List branches for selected repository
+    spinner.start('Loading branches...');
+    const branches = await api.listBranches(bucketSlug, repositoryId);
+    spinner.stop();
+
+    if (branches.length === 0) {
+      baseBranch = 'main';
+      display.info('Using default branch: main');
+    } else {
+      const branchChoices = branches.map((branch) => ({
+        name: branch.name,
+        message: branch.name,
+      }));
+
+      baseBranch = await prompts.select({
+        message: 'Select base branch:',
+        choices: branchChoices,
+      });
+    }
+  }
+
   // Get prompt if not provided
   const prompt =
     options.prompt ||
     (await prompts.text({
-      message: 'Prompt (instructions for the agent):',
+      message: isRepository 
+        ? 'What would you like the agent to do with the code?'
+        : 'Prompt (instructions for the agent):',
       required: true,
     }));
 
@@ -150,9 +202,9 @@ async function createAgent(options: {
       agent_type: options.type as 'content' | 'repository' | 'computer_use',
       prompt,
       model: options.model,
-      emoji: options.emoji,
-      repository_id: options.repositoryId,
-      base_branch: options.baseBranch,
+      emoji: options.emoji || (isRepository ? '🔧' : '🤖'),
+      repository_id: repositoryId,
+      base_branch: baseBranch,
       start_url: options.startUrl,
       goal: options.goal,
       email_notifications: options.emailNotifications,
@@ -164,8 +216,33 @@ async function createAgent(options: {
 
     if (options.json) {
       display.json(agent);
-    } else {
-      display.keyValue('ID', agent.id);
+      return;
+    }
+
+    display.keyValue('ID', agent.id);
+    display.keyValue('Type', agent.agent_type);
+    
+    if (isRepository) {
+      display.keyValue('Repository', repositoryId || '-');
+      display.keyValue('Base Branch', baseBranch || '-');
+    }
+
+    // Optionally run the agent immediately
+    if (options.run) {
+      display.newline();
+      await runAgent(agent.id, { json: options.json });
+    } else if (isRepository) {
+      display.newline();
+      const shouldRun = await prompts.confirm({
+        message: 'Run the agent now?',
+        initial: true,
+      });
+
+      if (shouldRun) {
+        await runAgent(agent.id, { json: options.json });
+      } else {
+        display.info(`Run later with: ${chalk.cyan(`cosmic agents run ${agent.id}`)}`);
+      }
     }
   } catch (error) {
     spinner.fail('Failed to create agent');
@@ -198,13 +275,22 @@ async function runAgent(
       return;
     }
 
-    display.keyValue('Execution ID', execution.id);
-    display.keyValue('Status', display.formatStatus(execution.status));
+    const executionId = execution.id || execution.execution_id || (execution as any)._id;
+    
+    display.keyValue('Execution ID', executionId || 'Started (check dashboard for details)');
+    display.keyValue('Status', display.formatStatus(execution.status || 'pending'));
 
-    display.newline();
-    display.info(
-      `Track progress with: ${chalk.cyan(`cosmic agents executions ${agentId} ${execution.id}`)}`
-    );
+    if (executionId) {
+      display.newline();
+      display.info(
+        `Track progress with: ${chalk.cyan(`cosmic agents executions ${agentId} ${executionId}`)}`
+      );
+    } else {
+      display.newline();
+      display.info(
+        `View executions with: ${chalk.cyan(`cosmic agents executions ${agentId}`)}`
+      );
+    }
   } catch (error) {
     spinner.fail('Failed to run agent');
     display.error((error as Error).message);
@@ -333,6 +419,116 @@ async function deleteAgent(
 }
 
 /**
+ * Add follow-up task to an agent
+ */
+async function addFollowUp(
+  agentId: string,
+  options: { prompt?: string; json?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  // Get prompt if not provided
+  const prompt =
+    options.prompt ||
+    (await prompts.text({
+      message: 'Follow-up instructions:',
+      required: true,
+    }));
+
+  try {
+    spinner.start('Adding follow-up task...');
+    const execution = await api.addAgentFollowUp(bucketSlug, agentId, prompt);
+    spinner.succeed('Follow-up task started');
+
+    if (options.json) {
+      display.json(execution);
+      return;
+    }
+
+    display.keyValue('Execution ID', execution.id);
+    display.keyValue('Status', display.formatStatus(execution.status));
+
+    display.newline();
+    display.info(
+      `Track progress with: ${chalk.cyan(`cosmic agents executions ${agentId} ${execution.id}`)}`
+    );
+  } catch (error) {
+    spinner.fail('Failed to add follow-up');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Create pull request from agent's work
+ */
+async function createPR(
+  agentId: string,
+  options: { title?: string; body?: string; json?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  // Get latest execution
+  spinner.start('Loading agent...');
+  const executions = await api.listAgentExecutions(bucketSlug, agentId);
+  spinner.stop();
+
+  if (executions.length === 0) {
+    display.error('No executions found for this agent');
+    display.info('Run the agent first to generate code changes.');
+    process.exit(1);
+  }
+
+  const latestExecution = executions[0];
+
+  // Get PR title if not provided
+  const title =
+    options.title ||
+    (await prompts.text({
+      message: 'PR title:',
+      required: true,
+    }));
+
+  // Get PR body if not provided
+  const body =
+    options.body ||
+    (await prompts.text({
+      message: 'PR description (optional):',
+      required: false,
+    }));
+
+  try {
+    spinner.start('Creating pull request...');
+    const result = await api.createAgentPR(bucketSlug, agentId, latestExecution.id, {
+      title,
+      body,
+    });
+
+    if (result.success) {
+      spinner.succeed('Pull request created');
+
+      if (options.json) {
+        display.json(result);
+        return;
+      }
+
+      if (result.pr_url) {
+        display.keyValue('PR URL', chalk.green(result.pr_url));
+      }
+      if (result.pr_number) {
+        display.keyValue('PR Number', `#${result.pr_number}`);
+      }
+    } else {
+      spinner.fail('Failed to create pull request');
+    }
+  } catch (error) {
+    spinner.fail('Failed to create pull request');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Create agents commands
  */
 export function createAgentsCommands(program: Command): void {
@@ -368,6 +564,7 @@ export function createAgentsCommands(program: Command): void {
     .option('--goal <goal>', 'Goal (for computer_use type)')
     .option('--email-notifications', 'Enable email notifications')
     .option('--require-approval', 'Require approval before execution')
+    .option('--run', 'Run the agent immediately after creation')
     .option('--json', 'Output as JSON')
     .action(createAgent);
 
@@ -377,6 +574,23 @@ export function createAgentsCommands(program: Command): void {
     .option('-p, --prompt <prompt>', 'Override prompt')
     .option('--json', 'Output as JSON')
     .action(runAgent);
+
+  agentsCmd
+    .command('follow-up <agentId>')
+    .alias('followup')
+    .description('Add a follow-up task to continue work on the same branch')
+    .option('-p, --prompt <prompt>', 'Follow-up instructions')
+    .option('--json', 'Output as JSON')
+    .action(addFollowUp);
+
+  agentsCmd
+    .command('pr <agentId>')
+    .alias('pull-request')
+    .description('Create a pull request from agent work')
+    .option('-t, --title <title>', 'PR title')
+    .option('-b, --body <body>', 'PR description')
+    .option('--json', 'Output as JSON')
+    .action(createPR);
 
   agentsCmd
     .command('delete <id>')

@@ -168,8 +168,9 @@ async function listProjects(): Promise<void> {
       const id = String(projAny.id || projAny._id || '-');
       const title = String(projAny.title || '-');
       const buckets = projAny.total_buckets || 0;
+      const bucketText = `${buckets} bucket${Number(buckets) !== 1 ? 's' : ''}`;
 
-      console.log(`    📁  ${chalk.cyan(id.padEnd(26))} ${title.padEnd(25)} ${chalk.dim(`${buckets} bucket${Number(buckets) !== 1 ? 's' : ''}`)}`);
+      console.log(`    📁  ${chalk.cyan(id.padEnd(26))}${title.padEnd(28)}${chalk.dim(bucketText)}`);
     }
     console.log();
   } catch (error) {
@@ -245,8 +246,9 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
       const title = String(objType.title || objType.singular || '-');
       const count = objType.total_objects || 0;
       const emoji = (objType.emoji as string) || '📄';
+      const countText = `${count} object${Number(count) !== 1 ? 's' : ''}`;
 
-      console.log(`    ${emoji}  ${chalk.cyan(slug.padEnd(18))} ${title.padEnd(20)} ${chalk.dim(`${count} object${Number(count) !== 1 ? 's' : ''}`)}`);
+      console.log(`    ${emoji}  ${chalk.cyan(slug.padEnd(22))}${title.padEnd(24)}${chalk.dim(countText)}`);
     }
     console.log();
   } catch (error) {
@@ -312,7 +314,10 @@ async function cd(path?: string): Promise<void> {
     clearConfigValue('currentProjectId');
     clearConfigValue('currentBucket');
     clearConfigValue('currentObjectType');
-    console.log(chalk.dim('/'));
+    console.log();
+    console.log(chalk.green(`  ✓ Now at Cosmic CLI home`));
+    console.log(chalk.dim(`    Use "ls" to see projects.`));
+    console.log();
     return;
   }
 
@@ -320,23 +325,67 @@ async function cd(path?: string): Promise<void> {
   if (path === '..') {
     const currentObjectType = getCurrentObjectType();
     const currentBucket = getConfigValue('currentBucket'); // Don't use credential fallback
-    const currentProject = getCurrentProjectId();
+    const currentProjectId = getCurrentProjectId();
+    const currentProjectTitle = getConfigValue('currentProject') || currentProjectId;
 
     if (currentObjectType) {
       // In object type, go up to bucket
       clearConfigValue('currentObjectType');
-      console.log(chalk.dim(`/${currentProject}/${currentBucket}`));
+      // Fetch bucket title
+      try {
+        const bucket = await api.getBucket(currentBucket);
+        const bucketTitle = String((bucket as Record<string, unknown>).title || currentBucket);
+        console.log();
+        console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(currentProjectTitle)} / Bucket: ${chalk.bold(bucketTitle)}`));
+        console.log();
+      } catch {
+        console.log();
+        console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(currentProjectTitle)} / Bucket: ${chalk.bold(currentBucket)}`));
+        console.log();
+      }
     } else if (currentBucket) {
-      // In bucket, go up to project
+      // In bucket, go up to project (or root if only one bucket)
       clearConfigValue('currentBucket');
-      console.log(chalk.dim(`/${currentProject}`));
-    } else if (currentProject) {
+
+      // Check if project has only one bucket - if so, go directly to root
+      try {
+        const project = await api.getProject(currentProjectId);
+        const buckets = ((project as Record<string, unknown>).buckets || []) as Array<Record<string, unknown>>;
+
+        if (buckets.length === 1) {
+          // Only one bucket, go directly to root
+          clearConfigValue('currentProject');
+          clearConfigValue('currentProjectId');
+          console.log();
+          console.log(chalk.green(`  ✓ Now at Cosmic CLI home`));
+          console.log(chalk.dim(`    Use "ls" to see projects.`));
+          console.log();
+        } else {
+          console.log();
+          console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(currentProjectTitle)}`));
+          console.log(chalk.dim(`    Use "ls" to see buckets, or "cd <bucket-slug>" to select a bucket.`));
+          console.log();
+        }
+      } catch {
+        // Fallback to staying at project level
+        console.log();
+        console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(currentProjectTitle)}`));
+        console.log(chalk.dim(`    Use "ls" to see buckets, or "cd <bucket-slug>" to select a bucket.`));
+        console.log();
+      }
+    } else if (currentProjectId) {
       // In project, go up to root
       clearConfigValue('currentProject');
       clearConfigValue('currentProjectId');
-      console.log(chalk.dim('/'));
+      console.log();
+      console.log(chalk.green(`  ✓ Now at Cosmic CLI home`));
+      console.log(chalk.dim(`    Use "ls" to see projects.`));
+      console.log();
     } else {
-      console.log(chalk.dim('/'));
+      console.log();
+      console.log(chalk.green(`  ✓ Now at Cosmic CLI home`));
+      console.log(chalk.dim(`    Use "ls" to see projects.`));
+      console.log();
     }
     return;
   }
@@ -362,8 +411,9 @@ async function cd(path?: string): Promise<void> {
       spinner.stop();
 
       const projAny = project as Record<string, unknown>;
+      const projectTitle = String(projAny.title || projectId);
       setConfigValue('currentProjectId', String(projAny.id || projectId));
-      setConfigValue('currentProject', String(projAny.title || projectId));
+      setConfigValue('currentProject', projectTitle);
       clearConfigValue('currentObjectType');
 
       if (parts.length >= 2) {
@@ -376,6 +426,7 @@ async function cd(path?: string): Promise<void> {
           process.exit(1);
         }
 
+        const bucketTitle = String(bucket.title || bucketSlug);
         setConfigValue('currentBucket', bucketSlug);
         // Store bucket keys for SDK
         await storeBucketKeys(bucketSlug);
@@ -392,14 +443,39 @@ async function cd(path?: string): Promise<void> {
             process.exit(1);
           }
 
+          const objTypeTitle = String(objType.title || typeSlug);
           setConfigValue('currentObjectType', typeSlug);
-          console.log(chalk.dim(`/${projectId}/${bucketSlug}/${typeSlug}`));
+          console.log();
+          console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(projectTitle)} / Bucket: ${chalk.bold(bucketTitle)} / Type: ${chalk.bold(objTypeTitle)}`));
+          console.log();
         } else {
-          console.log(chalk.dim(`/${projectId}/${bucketSlug}`));
+          console.log();
+          console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(projectTitle)} / Bucket: ${chalk.bold(bucketTitle)}`));
+          console.log(chalk.dim(`    Use "ls" to see object types, or start chatting with "cosmic chat".`));
+          console.log();
         }
       } else {
-        clearConfigValue('currentBucket');
-        console.log(chalk.dim(`/${projectId}`));
+        // Only project specified - check if single bucket to auto-navigate
+        const buckets = (projAny.buckets || []) as Array<Record<string, unknown>>;
+
+        if (buckets.length === 1) {
+          const bucket = buckets[0];
+          const bucketSlug = String(bucket.slug || '');
+          const bucketTitle = String(bucket.title || bucketSlug);
+          setConfigValue('currentBucket', bucketSlug);
+          await storeBucketKeys(bucketSlug);
+          console.log();
+          console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(projectTitle)} / Bucket: ${chalk.bold(bucketTitle)}`));
+          console.log(chalk.dim(`    (Auto-selected only bucket)`));
+          console.log(chalk.dim(`    Use "ls" to see object types, or start chatting with "cosmic chat".`));
+          console.log();
+        } else {
+          clearConfigValue('currentBucket');
+          console.log();
+          console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(projectTitle)}`));
+          console.log(chalk.dim(`    Use "ls" to see buckets, or "cd <bucket-slug>" to select a bucket.`));
+          console.log();
+        }
       }
     } catch (error) {
       spinner.fail('Invalid path');
@@ -422,11 +498,32 @@ async function cd(path?: string): Promise<void> {
       spinner.stop();
 
       const projAny = project as Record<string, unknown>;
+      const projectTitle = String(projAny.title || path);
+      const buckets = (projAny.buckets || []) as Array<Record<string, unknown>>;
+
       setConfigValue('currentProjectId', String(projAny.id || path));
-      setConfigValue('currentProject', String(projAny.title || path));
-      clearConfigValue('currentBucket');
+      setConfigValue('currentProject', projectTitle);
       clearConfigValue('currentObjectType');
-      console.log(chalk.dim(`/${path}`));
+
+      // If only one bucket, auto-navigate into it
+      if (buckets.length === 1) {
+        const bucket = buckets[0];
+        const bucketSlug = String(bucket.slug || '');
+        const bucketTitle = String(bucket.title || bucketSlug);
+        setConfigValue('currentBucket', bucketSlug);
+        await storeBucketKeys(bucketSlug);
+        console.log();
+        console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(projectTitle)} / Bucket: ${chalk.bold(bucketTitle)}`));
+        console.log(chalk.dim(`    (Auto-selected only bucket)`));
+        console.log(chalk.dim(`    Use "ls" to see object types, or start chatting with "cosmic chat".`));
+        console.log();
+      } else {
+        clearConfigValue('currentBucket');
+        console.log();
+        console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(projectTitle)}`));
+        console.log(chalk.dim(`    Use "ls" to see buckets, or "cd <bucket-slug>" to select a bucket.`));
+        console.log();
+      }
     } catch (error) {
       spinner.fail('Not found');
       display.error((error as Error).message);
@@ -448,11 +545,16 @@ async function cd(path?: string): Promise<void> {
         process.exit(1);
       }
 
+      const bucketTitle = String(bucket.title || path);
+      const projectTitle = String(projAny.title || currentProjectId);
       setConfigValue('currentBucket', path);
       clearConfigValue('currentObjectType');
       // Store bucket keys for SDK
       await storeBucketKeys(path);
-      console.log(chalk.dim(`/${currentProjectId}/${path}`));
+      console.log();
+      console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(projectTitle)} / Bucket: ${chalk.bold(bucketTitle)}`));
+      console.log(chalk.dim(`    Use "ls" to see object types, or start chatting with "cosmic chat".`));
+      console.log();
     } catch (error) {
       spinner.fail('Not found');
       display.error((error as Error).message);
@@ -474,8 +576,12 @@ async function cd(path?: string): Promise<void> {
         process.exit(1);
       }
 
+      const objTypeTitle = String(objType.title || path);
       setConfigValue('currentObjectType', path);
-      console.log(chalk.dim(`/${currentProjectId}/${currentBucket}/${path}`));
+      console.log();
+      console.log(chalk.green(`  ✓ Now in Object Type: ${chalk.bold(objTypeTitle)}`));
+      console.log(chalk.dim(`    Use "ls" to see objects.`));
+      console.log();
     } catch (error) {
       spinner.fail('Not found');
       display.error((error as Error).message);

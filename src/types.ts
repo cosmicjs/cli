@@ -216,7 +216,9 @@ export interface Agent {
 }
 
 export interface AgentExecution {
-  id: string;
+  id?: string;
+  execution_id?: string;
+  _id?: string;
   agent_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   started_at?: string;
