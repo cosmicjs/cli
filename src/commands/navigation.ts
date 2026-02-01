@@ -490,8 +490,11 @@ async function cd(path?: string): Promise<void> {
   const currentBucket = getConfigValue('currentBucket'); // Don't use credential fallback
   const currentObjectType = getCurrentObjectType();
 
-  if (!currentProjectId) {
-    // At root level - path should be a project ID
+  // Check if path looks like a MongoDB ObjectId (24 hex chars) - treat as project ID
+  const isProjectId = /^[a-f0-9]{24}$/i.test(path);
+
+  if (!currentProjectId || isProjectId) {
+    // At root level OR path is a project ID - navigate to project
     try {
       spinner.start('');
       const project = await api.getProject(path);

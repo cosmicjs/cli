@@ -297,6 +297,8 @@ async function projects(options: { workspace?: string; all?: boolean } = {}): Pr
     }
 
     display.newline();
+    console.log(chalk.dim(`  Use ${chalk.cyan('cosmic cd <project-id>')} to navigate to a project.`));
+    display.newline();
   } catch (error) {
     spinner.fail('Failed to load projects');
     display.error((error as Error).message);

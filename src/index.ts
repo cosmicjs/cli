@@ -147,7 +147,8 @@ program.action(async () => {
     console.log(`  ${chalk.cyan('cosmic build')}      ${chalk.green('Build an app with AI')} (creates repo & deploys)`);
     console.log(`  ${chalk.cyan('cosmic update')}     ${chalk.magenta('Update an app with AI')} (edits code & deploys)`);
     console.log(`  ${chalk.cyan('cosmic login')}      Login to your Cosmic account`);
-    console.log(`  ${chalk.cyan('cosmic use')}        Set bucket context`);
+    console.log(`  ${chalk.cyan('cosmic projects')}   List and manage projects`);
+    console.log(`  ${chalk.cyan('cosmic cd')}         Navigate to project/bucket`);
     console.log(`  ${chalk.cyan('cosmic ls')}         List objects in current bucket`);
     console.log(`  ${chalk.cyan('cosmic get')}        Get an object by slug or ID`);
     console.log(`  ${chalk.cyan('cosmic media')}      Media file operations`);
