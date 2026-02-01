@@ -442,7 +442,7 @@ async function installContentToCosmic(
     // Show next steps prompt if content was added
     if (typesAdded > 0 || objectsAdded > 0) {
       console.log();
-      
+
       const nextAction = await select<'build' | 'content' | 'exit'>({
         message: 'What would you like to do next?',
         choices: [
@@ -451,7 +451,7 @@ async function installContentToCosmic(
           { name: 'exit', message: 'Exit' },
         ],
       });
-      
+
       return { added: true, nextAction };
     }
 
@@ -2863,21 +2863,21 @@ async function processMessage(
               }
             } else if (!isGeneratingFiles) {
               // Check if this is structured app output (has markers) or conversational response
-              const hasAppMarkers = fullText.includes('<!-- APP_OVERVIEW_START -->') || 
-                                    fullText.includes('<!-- METADATA:') ||
-                                    fullText.includes('<!-- README_START -->');
-              
+              const hasAppMarkers = fullText.includes('<!-- APP_OVERVIEW_START -->') ||
+                fullText.includes('<!-- METADATA:') ||
+                fullText.includes('<!-- README_START -->');
+
               if (hasAppMarkers) {
                 // Structured app output - only show content between APP_OVERVIEW_START and APP_OVERVIEW_END
                 const overviewStart = fullText.indexOf('<!-- APP_OVERVIEW_START -->');
                 const overviewEnd = fullText.indexOf('<!-- APP_OVERVIEW_END -->');
-                
+
                 if (overviewStart !== -1 && !hasShownOverview) {
                   // Extract and show only the overview content
                   const startPos = overviewStart + '<!-- APP_OVERVIEW_START -->'.length;
                   const endPos = overviewEnd !== -1 ? overviewEnd : fullText.length;
                   const overviewContent = fullText.slice(startPos, endPos);
-                  
+
                   // Show new content since last print
                   if (overviewContent.length > overviewPrinted) {
                     const newContent = overviewContent.slice(overviewPrinted);
@@ -2892,7 +2892,7 @@ async function processMessage(
                     }
                     overviewPrinted = overviewContent.length;
                   }
-                  
+
                   if (overviewEnd !== -1) {
                     hasShownOverview = true;
                     console.log();
@@ -3181,19 +3181,19 @@ async function processMessage(
           role: msg.role as 'user' | 'assistant',
           content: [{ type: 'text' as const, text: msg.content }],
         }));
-        
+
         let fullText = '';
         let lastPrintedLength = 0;
         let isContentModelMode = false;
         let dotCount = 0;
         let loadingInterval: NodeJS.Timeout | null = null;
-        
+
         // Check if the user message suggests content model creation
         const lastUserMessage = conversationHistory[conversationHistory.length - 1]?.content?.toLowerCase() || '';
-        const isLikelyContentModel = lastUserMessage.includes('content model') || 
-                                      lastUserMessage.includes('object type') ||
-                                      lastUserMessage.includes('install_content_model');
-        
+        const isLikelyContentModel = lastUserMessage.includes('content model') ||
+          lastUserMessage.includes('object type') ||
+          lastUserMessage.includes('install_content_model');
+
         // Start loading indicator for likely content model requests
         if (isLikelyContentModel) {
           console.log();
@@ -3205,7 +3205,7 @@ async function processMessage(
         } else {
           console.log(); // New line before streaming output
         }
-        
+
         const result = await api.streamingChat({
           messages: dashboardMessages,
           bucketSlug,
@@ -3214,7 +3214,7 @@ async function processMessage(
           viewMode: 'content-model', // Use content-model view mode for regular chat
           onChunk: (chunk) => {
             fullText += chunk;
-            
+
             // Detect content model output (METADATA markers or ACTION:)
             if (!isContentModelMode) {
               if (fullText.includes('<!-- METADATA:') || fullText.includes('ACTION:')) {
@@ -3223,12 +3223,12 @@ async function processMessage(
                 return;
               }
             }
-            
+
             // Skip streaming if in content model mode
             if (isContentModelMode || isLikelyContentModel) {
               return;
             }
-            
+
             // Stream the text response in real-time for non-content-model responses
             const newContent = fullText.slice(lastPrintedLength);
             if (newContent) {
@@ -3237,27 +3237,27 @@ async function processMessage(
             }
           },
         });
-        
+
         // Clear loading interval
         if (loadingInterval) {
           clearInterval(loadingInterval);
           process.stdout.write('\r' + ' '.repeat(40) + '\r'); // Clear the loading line
         }
-        
+
         // Track if we already streamed the text
         const alreadyStreamedText = lastPrintedLength > 0 && !isContentModelMode;
-        
+
         if (alreadyStreamedText) {
           console.log(); // New line after streamed content
         }
-        
+
         response = {
           text: result.text,
           messageId: result.messageId,
           usage: undefined,
           _alreadyStreamed: alreadyStreamedText || isContentModelMode,
         };
-        
+
         // Check if AI response contains content to add to Cosmic CMS (metadata marker format)
         const extractedContent = extractContentFromResponse(fullText);
         if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
@@ -3325,62 +3325,62 @@ async function processMessage(
       let displayText = '';
       let actionResults: string[] = [];
       let actionExecuted = false;
-      
+
       // Find ACTION: in the response and extract the full JSON
       const actionIndex = response.text.indexOf('ACTION:');
       if (actionIndex !== -1 && !actionExecuted) {
         // Extract JSON starting after "ACTION:"
         const afterAction = response.text.substring(actionIndex + 7).trim();
-        
+
         // Find the start of JSON (first { or [)
         const jsonStartIndex = afterAction.search(/[{[]/);
         if (jsonStartIndex !== -1) {
           const jsonStart = afterAction.substring(jsonStartIndex);
-          
+
           // Use brace matching to find the complete JSON object
           let braceCount = 0;
           let bracketCount = 0;
           let inString = false;
           let escapeNext = false;
           let jsonEndIndex = -1;
-          
+
           for (let i = 0; i < jsonStart.length; i++) {
             const char = jsonStart[i];
-            
+
             if (escapeNext) {
               escapeNext = false;
               continue;
             }
-            
+
             if (char === '\\' && inString) {
               escapeNext = true;
               continue;
             }
-            
+
             if (char === '"') {
               inString = !inString;
               continue;
             }
-            
+
             if (!inString) {
               if (char === '{') braceCount++;
               if (char === '}') braceCount--;
               if (char === '[') bracketCount++;
               if (char === ']') bracketCount--;
-              
+
               if (braceCount === 0 && bracketCount === 0 && (char === '}' || char === ']')) {
                 jsonEndIndex = i + 1;
                 break;
               }
             }
           }
-          
+
           if (jsonEndIndex !== -1) {
             const actionJson = jsonStart.substring(0, jsonEndIndex);
             const result = await executeAction(actionJson);
             actionResults.push(result);
             actionExecuted = true;
-            
+
             // Build displayText excluding the ACTION: line and its JSON content
             // Find where the JSON ends in the original response
             const actionEndInOriginal = actionIndex + 7 + jsonStartIndex + jsonEndIndex;
@@ -3609,7 +3609,7 @@ async function processMessage(
 
                     // Poll for the new deployment
                     const fixDeployResult = await pollDeploymentStatus(bucketSlug, vercelProjectId, repositoryUrl);
-                    
+
                     // If deployment succeeded after fix, switch to repo mode
                     if (fixDeployResult.success && repositoryUrl) {
                       isBuildMode = false;
@@ -3636,7 +3636,7 @@ async function processMessage(
                 const repoOwner = urlParts[0] || 'cosmic-community';
                 const repoNameFromUrl = urlParts[1] || repoName;
                 const repositoryId = result.data?.repository_id || '';
-                
+
                 isBuildMode = false;
                 isRepoMode = true;
                 currentRepo = {
@@ -3792,9 +3792,9 @@ function padText(text: string, width: number, align: 'left' | 'center' | 'right'
   const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, '');
   const textLen = stripAnsi(text).length;
   const padding = width - textLen - 2; // -2 for border chars
-  
+
   if (padding < 0) return '│' + text.slice(0, width - 2) + '│';
-  
+
   if (align === 'center') {
     const leftPad = Math.floor(padding / 2);
     const rightPad = padding - leftPad;
@@ -3812,7 +3812,7 @@ function padText(text: string, width: number, align: 'left' | 'center' | 'right'
 function printWelcomeScreen(model: string): void {
   // Get version
   const version = '1.0.0';
-  
+
   // Determine mode
   let modeText = '';
   let modeColor = chalk.cyan;
@@ -3823,16 +3823,16 @@ function printWelcomeScreen(model: string): void {
     modeText = 'Build Mode';
     modeColor = chalk.green;
   }
-  
+
   // Get user name
   const userName = process.env.USER || process.env.USERNAME || 'there';
-  
+
   // Calculate content widths to determine box size
   const logoWidth = 48;
   const contextText = `Context: ${formatContext()}`;
   const modelText = `Model: ${model}`;
   const repoText = isRepoMode && currentRepo ? `Repository: ${currentRepo.owner}/${currentRepo.name} (${currentRepo.branch})` : '';
-  
+
   // Find the widest content line
   const contentLines = [
     logoWidth,
@@ -3842,13 +3842,13 @@ function printWelcomeScreen(model: string): void {
     'Build and deploy a website:    cosmic chat --build'.length,
   ];
   const maxContentWidth = Math.max(...contentLines);
-  
+
   // Inner width = max content + padding (4 chars for margins)
   const innerWidth = maxContentWidth + 4;
-  
+
   // Helper to strip ANSI codes
   const stripAnsi = (str: string): string => str.replace(/\x1b\[[0-9;]*m/g, '');
-  
+
   // Helper to center text
   const centerLine = (text: string, color = chalk.white): string => {
     const textLen = stripAnsi(text).length;
@@ -3856,17 +3856,17 @@ function printWelcomeScreen(model: string): void {
     const rightPad = innerWidth - textLen - leftPad;
     return chalk.cyan('│') + ' '.repeat(leftPad) + color(text) + ' '.repeat(rightPad) + chalk.cyan('│');
   };
-  
+
   // Helper for left-aligned text
   const leftLine = (text: string): string => {
     const textLen = stripAnsi(text).length;
     const rightPad = innerWidth - textLen - 2;
     return chalk.cyan('│') + '  ' + text + ' '.repeat(Math.max(0, rightPad)) + chalk.cyan('│');
   };
-  
+
   // Empty line
   const emptyLine = (): string => chalk.cyan('│') + ' '.repeat(innerWidth) + chalk.cyan('│');
-  
+
   // Horizontal rule
   const hrTop = (title: string): string => {
     const borderLen = innerWidth - title.length;
@@ -3876,31 +3876,31 @@ function printWelcomeScreen(model: string): void {
   };
   const hrMid = (): string => chalk.cyan('├' + '─'.repeat(innerWidth) + '┤');
   const hrBot = (): string => chalk.cyan('╰' + '─'.repeat(innerWidth) + '╯');
-  
+
   console.log();
-  
+
   // Top border with title
   console.log(hrTop(` Cosmic CLI v${version} `));
   console.log(emptyLine());
-  
+
   // Logo - centered
   for (const line of COSMIC_LOGO) {
     const leftPad = Math.floor((innerWidth - line.length) / 2);
     const rightPad = innerWidth - line.length - leftPad;
     console.log(chalk.cyan('│') + ' '.repeat(leftPad) + chalk.cyan(line) + ' '.repeat(rightPad) + chalk.cyan('│'));
   }
-  
+
   console.log(emptyLine());
   console.log(centerLine(`Welcome, ${userName}!`, chalk.bold.white));
-  
+
   if (modeText) {
     console.log(centerLine(modeText, modeColor.bold));
   }
-  
+
   console.log(emptyLine());
   console.log(hrMid());
   console.log(emptyLine());
-  
+
   // Tips
   console.log(leftLine(chalk.bold.white('Getting started')));
   console.log(emptyLine());
@@ -3908,17 +3908,17 @@ function printWelcomeScreen(model: string): void {
   console.log(leftLine(chalk.dim('Update an existing repository: ') + chalk.white('cosmic chat --repo')));
   console.log(leftLine(chalk.dim('Create a new project:          ') + chalk.white('cosmic projects create')));
   console.log(emptyLine());
-  
+
   console.log(hrMid());
-  
+
   // Info
   console.log(leftLine(chalk.dim(modelText)));
   console.log(leftLine(chalk.dim(contextText)));
-  
+
   if (repoText) {
     console.log(leftLine(chalk.dim(repoText)));
   }
-  
+
   console.log(hrBot());
   console.log();
 }
