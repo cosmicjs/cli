@@ -3759,30 +3759,176 @@ function formatResponse(text: string): string {
 }
 
 /**
- * Print chat header
+ * Get terminal width (with fallback)
+ */
+function getTerminalWidth(): number {
+  return process.stdout.columns || 80;
+}
+
+/**
+ * Cosmic logo - large ASCII letters
+ */
+const COSMIC_LOGO = [
+  ' ██████╗ ██████╗ ███████╗███╗   ███╗██╗ ██████╗',
+  '██╔════╝██╔═══██╗██╔════╝████╗ ████║██║██╔════╝',
+  '██║     ██║   ██║███████╗██╔████╔██║██║██║     ',
+  '██║     ██║   ██║╚════██║██║╚██╔╝██║██║██║     ',
+  '╚██████╗╚██████╔╝███████║██║ ╚═╝ ██║██║╚██████╗',
+  ' ╚═════╝ ╚═════╝ ╚══════╝╚═╝     ╚═╝╚═╝ ╚═════╝',
+];
+
+/**
+ * Print a horizontal line for the box
+ */
+function printBoxLine(width: number, left: string, fill: string, right: string): string {
+  return left + fill.repeat(width - 2) + right;
+}
+
+/**
+ * Print text padded to width
+ */
+function padText(text: string, width: number, align: 'left' | 'center' | 'right' = 'left'): string {
+  // Strip ANSI codes for length calculation
+  const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, '');
+  const textLen = stripAnsi(text).length;
+  const padding = width - textLen - 2; // -2 for border chars
+  
+  if (padding < 0) return '│' + text.slice(0, width - 2) + '│';
+  
+  if (align === 'center') {
+    const leftPad = Math.floor(padding / 2);
+    const rightPad = padding - leftPad;
+    return '│' + ' '.repeat(leftPad) + text + ' '.repeat(rightPad) + '│';
+  } else if (align === 'right') {
+    return '│' + ' '.repeat(padding) + text + '│';
+  } else {
+    return '│' + text + ' '.repeat(padding) + '│';
+  }
+}
+
+/**
+ * Print the welcome screen with Cosmic logo
+ */
+function printWelcomeScreen(model: string): void {
+  // Get version
+  const version = '1.0.0';
+  
+  // Determine mode
+  let modeText = '';
+  let modeColor = chalk.cyan;
+  if (isRepoMode && currentRepo) {
+    modeText = 'Repository Mode';
+    modeColor = chalk.magenta;
+  } else if (isBuildMode) {
+    modeText = 'Build Mode';
+    modeColor = chalk.green;
+  }
+  
+  // Get user name
+  const userName = process.env.USER || process.env.USERNAME || 'there';
+  
+  // Calculate content widths to determine box size
+  const logoWidth = 48;
+  const contextText = `Context: ${formatContext()}`;
+  const modelText = `Model: ${model}`;
+  const repoText = isRepoMode && currentRepo ? `Repository: ${currentRepo.owner}/${currentRepo.name} (${currentRepo.branch})` : '';
+  
+  // Find the widest content line
+  const contentLines = [
+    logoWidth,
+    contextText.length,
+    modelText.length,
+    repoText.length,
+    'Build and deploy a website:    cosmic chat --build'.length,
+  ];
+  const maxContentWidth = Math.max(...contentLines);
+  
+  // Inner width = max content + padding (4 chars for margins)
+  const innerWidth = maxContentWidth + 4;
+  
+  // Helper to strip ANSI codes
+  const stripAnsi = (str: string): string => str.replace(/\x1b\[[0-9;]*m/g, '');
+  
+  // Helper to center text
+  const centerLine = (text: string, color = chalk.white): string => {
+    const textLen = stripAnsi(text).length;
+    const leftPad = Math.floor((innerWidth - textLen) / 2);
+    const rightPad = innerWidth - textLen - leftPad;
+    return chalk.cyan('│') + ' '.repeat(leftPad) + color(text) + ' '.repeat(rightPad) + chalk.cyan('│');
+  };
+  
+  // Helper for left-aligned text
+  const leftLine = (text: string): string => {
+    const textLen = stripAnsi(text).length;
+    const rightPad = innerWidth - textLen - 2;
+    return chalk.cyan('│') + '  ' + text + ' '.repeat(Math.max(0, rightPad)) + chalk.cyan('│');
+  };
+  
+  // Empty line
+  const emptyLine = (): string => chalk.cyan('│') + ' '.repeat(innerWidth) + chalk.cyan('│');
+  
+  // Horizontal rule
+  const hrTop = (title: string): string => {
+    const borderLen = innerWidth - title.length;
+    const left = Math.floor(borderLen / 2);
+    const right = borderLen - left;
+    return chalk.cyan('╭' + '─'.repeat(left) + title + '─'.repeat(right) + '╮');
+  };
+  const hrMid = (): string => chalk.cyan('├' + '─'.repeat(innerWidth) + '┤');
+  const hrBot = (): string => chalk.cyan('╰' + '─'.repeat(innerWidth) + '╯');
+  
+  console.log();
+  
+  // Top border with title
+  console.log(hrTop(` Cosmic CLI v${version} `));
+  console.log(emptyLine());
+  
+  // Logo - centered
+  for (const line of COSMIC_LOGO) {
+    const leftPad = Math.floor((innerWidth - line.length) / 2);
+    const rightPad = innerWidth - line.length - leftPad;
+    console.log(chalk.cyan('│') + ' '.repeat(leftPad) + chalk.cyan(line) + ' '.repeat(rightPad) + chalk.cyan('│'));
+  }
+  
+  console.log(emptyLine());
+  console.log(centerLine(`Welcome, ${userName}!`, chalk.bold.white));
+  
+  if (modeText) {
+    console.log(centerLine(modeText, modeColor.bold));
+  }
+  
+  console.log(emptyLine());
+  console.log(hrMid());
+  console.log(emptyLine());
+  
+  // Tips
+  console.log(leftLine(chalk.bold.white('Getting started')));
+  console.log(emptyLine());
+  console.log(leftLine(chalk.dim('Build and deploy a website:    ') + chalk.white('cosmic chat --build')));
+  console.log(leftLine(chalk.dim('Update an existing repository: ') + chalk.white('cosmic chat --repo')));
+  console.log(leftLine(chalk.dim('Create a new project:          ') + chalk.white('cosmic projects create')));
+  console.log(emptyLine());
+  
+  console.log(hrMid());
+  
+  // Info
+  console.log(leftLine(chalk.dim(modelText)));
+  console.log(leftLine(chalk.dim(contextText)));
+  
+  if (repoText) {
+    console.log(leftLine(chalk.dim(repoText)));
+  }
+  
+  console.log(hrBot());
+  console.log();
+}
+
+/**
+ * Print chat header (legacy simple version for non-interactive contexts)
  */
 function printHeader(model: string): void {
-  console.log();
-  if (isRepoMode && currentRepo) {
-    console.log(chalk.bold.magenta('  Cosmic Chat - Repository Mode'));
-    console.log(chalk.dim(`  Repository: `) + chalk.cyan(`${currentRepo.owner}/${currentRepo.name}`));
-    console.log(chalk.dim(`  Branch: ${currentRepo.branch}`));
-  } else if (isBuildMode) {
-    console.log(chalk.bold.green('  Cosmic Chat - Build Mode'));
-  } else {
-    console.log(chalk.bold.cyan('  Cosmic Chat'));
-  }
-  console.log(chalk.dim(`  Model: ${model}`));
-  console.log(chalk.dim(`  Context: ${formatContext()}`));
-  console.log();
-  if (isRepoMode) {
-    console.log(chalk.dim('  Describe the changes you want to make. AI will edit and commit.'));
-  } else {
-    console.log(chalk.dim('  Type your message and press Enter. Type "help" for commands.'));
-    console.log(chalk.dim('  To build & deploy an app, run: ') + chalk.cyan('cosmic chat --build'));
-    console.log(chalk.dim('  To update existing code, run: ') + chalk.cyan('cosmic chat --repo'));
-  }
-  console.log();
+  // Use the new welcome screen
+  printWelcomeScreen(model);
 }
 
 /**
