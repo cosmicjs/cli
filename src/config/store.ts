@@ -144,21 +144,36 @@ export function getApiUrl(): string {
   if (process.env.COSMIC_DAPI_URL) {
     return process.env.COSMIC_DAPI_URL;
   }
-  
+
   // Check API environment env var (overrides stored config)
   const apiEnv = process.env.COSMIC_API_ENV?.toLowerCase();
   if (apiEnv === 'staging') {
     return 'https://dapi.cosmic-staging.com/v3';
   }
-  
+
   // Check stored config
   const configUrl = getConfigValue('apiUrl');
   if (configUrl) {
     return configUrl;
   }
-  
+
   // Default to production
   return 'https://dapi.cosmicjs.com/v3';
+}
+
+/**
+ * Get the Workers API base URL (for media upload, import/export, etc.)
+ * Matches the dashboard's WORKERS_BASE_URL - uses same host pattern as DAPI but workers subdomain
+ * Priority: COSMIC_WORKERS_URL env var > derived from getApiUrl() > default production
+ */
+export function getWorkersUrl(): string {
+  if (process.env.COSMIC_WORKERS_URL) {
+    return process.env.COSMIC_WORKERS_URL;
+  }
+  const apiUrl = getApiUrl();
+  // Derive workers URL from DAPI: dapi.cosmicjs.com -> workers.cosmicjs.com, dapi.cosmic-staging.com -> workers.cosmic-staging.com
+  const workersUrl = apiUrl.replace(/dapi\./, 'workers.');
+  return workersUrl;
 }
 
 /**

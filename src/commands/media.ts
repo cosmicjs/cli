@@ -12,7 +12,6 @@ import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
-import { getSDKClient } from '../api/sdk.js';
 
 /**
  * List media
@@ -138,9 +137,9 @@ function getContentType(filePath: string): string {
 
 /**
  * Upload media
- * Uses SDK media.insertOne() which hits the correct REST API endpoint
+ * Uses Dashboard API (Workers) for parity with the dashboard
  */
-async function uploadMedia(
+async function uploadMediaCommand(
   filePath: string,
   options: {
     folder?: string;
@@ -173,22 +172,14 @@ async function uploadMedia(
       }
     }
 
-    const sdk = getSDKClient(bucketSlug);
-    if (!sdk) {
-      spinner.fail('SDK client not available');
-      display.error('Ensure bucket credentials (read key, write key) are configured.');
-      process.exit(1);
-    }
-
-    const result = await sdk.media.insertOne({
-      media: fileBuffer,
+    const media = await api.uploadMedia(bucketSlug, {
+      buffer: fileBuffer,
       filename,
       contentType,
       folder: options.folder,
       metadata,
     });
 
-    const media = (result as { media?: { id: string; name: string; url?: string; imgix_url?: string } }).media;
     if (!media) {
       spinner.fail('Upload succeeded but no media returned');
       process.exit(1);
@@ -279,7 +270,7 @@ export function createMediaCommands(program: Command): void {
     .option('-f, --folder <folder>', 'Target folder')
     .option('--metadata <json>', 'Metadata as JSON')
     .option('--json', 'Output as JSON')
-    .action(uploadMedia);
+    .action(uploadMediaCommand);
 
   mediaCmd
     .command('delete <ids...>')

@@ -5,7 +5,7 @@
 
 import { existsSync } from 'fs';
 import { resolve, isAbsolute } from 'path';
-import { getSDKClient } from '../api/sdk.js';
+import { uploadMedia } from '../api/dashboard.js';
 
 // Image extensions supported for AI vision
 const IMAGE_EXTENSIONS = new Set([
@@ -142,7 +142,7 @@ export function stripPathsFromMessage(text: string, segmentsToStrip: string[]): 
 
 /**
  * Upload a local file to Cosmic media and return the media ID
- * Uses SDK media.insertOne() which hits the correct REST API endpoint
+ * Uses Dashboard API (Workers) for parity with the dashboard
  */
 export async function uploadFileToMedia(
   filePath: string,
@@ -159,18 +159,12 @@ export async function uploadFileToMedia(
   const filename = basename(filePath);
   const contentType = getContentTypeFromPath(filePath);
 
-  const sdk = getSDKClient(bucketSlug);
-  if (!sdk) {
-    throw new Error('SDK client not available. Ensure bucket credentials (read key, write key) are configured.');
-  }
-
-  const result = await sdk.media.insertOne({
-    media: buffer,
+  const media = await uploadMedia(bucketSlug, {
+    buffer,
     filename,
     contentType,
   });
 
-  const media = (result as { media?: { id: string; name: string } }).media;
   if (!media?.id) {
     throw new Error('Media upload succeeded but no media ID returned');
   }

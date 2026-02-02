@@ -4,7 +4,7 @@
  */
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
-import { getApiUrl } from '../config/store.js';
+import { getApiUrl, getCurrentBucketSlug } from '../config/store.js';
 import { getAuthHeaders, getReadQueryParams } from '../auth/manager.js';
 import type { APIResponse } from '../types.js';
 
@@ -24,13 +24,13 @@ function isDebug(): boolean {
  */
 function getClient(): AxiosInstance {
   const apiUrl = getApiUrl();
-  
+
   // Recreate client if URL changed
   if (!client || currentBaseUrl !== apiUrl) {
     if (isDebug()) {
       console.log(`[DEBUG] Creating DAPI client with baseURL: ${apiUrl}`);
     }
-    
+
     client = axios.create({
       baseURL: apiUrl,
       timeout: 30000,
@@ -47,11 +47,11 @@ function getClient(): AxiosInstance {
     client.interceptors.request.use((config) => {
       const authHeaders = getAuthHeaders();
       Object.assign(config.headers, authHeaders);
-      
+
       if (isDebug()) {
         console.log(`[DEBUG] DAPI Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
       }
-      
+
       return config;
     });
 
@@ -178,8 +178,10 @@ export async function patch<T = unknown>(
 ): Promise<T> {
   let endpoint = url;
 
-  if (options.bucketSlug !== undefined || getCurrentBucketSlug()) {
-    endpoint = addBucketParam(endpoint, options.bucketSlug);
+  // Use provided bucketSlug or fall back to current bucket slug
+  const bucketSlug = options.bucketSlug ?? getCurrentBucketSlug();
+  if (bucketSlug) {
+    endpoint = addBucketParam(endpoint, bucketSlug);
   }
 
   const response = await getClient().patch<T>(endpoint, data, {
@@ -202,8 +204,10 @@ export async function put<T = unknown>(
 ): Promise<T> {
   let endpoint = url;
 
-  if (options.bucketSlug !== undefined || getCurrentBucketSlug()) {
-    endpoint = addBucketParam(endpoint, options.bucketSlug);
+  // Use provided bucketSlug or fall back to current bucket slug
+  const bucketSlug = options.bucketSlug ?? getCurrentBucketSlug();
+  if (bucketSlug) {
+    endpoint = addBucketParam(endpoint, bucketSlug);
   }
 
   const response = await getClient().put<T>(endpoint, data, {
@@ -226,8 +230,10 @@ export async function del<T = unknown>(
 ): Promise<T> {
   let endpoint = url;
 
-  if (options.bucketSlug !== undefined || getCurrentBucketSlug()) {
-    endpoint = addBucketParam(endpoint, options.bucketSlug);
+  // Use provided bucketSlug or fall back to current bucket slug
+  const bucketSlug = options.bucketSlug ?? getCurrentBucketSlug();
+  if (bucketSlug) {
+    endpoint = addBucketParam(endpoint, bucketSlug);
   }
 
   const response = await getClient().delete<T>(endpoint, {

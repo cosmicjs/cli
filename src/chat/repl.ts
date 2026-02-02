@@ -32,6 +32,10 @@ import {
   streamingRepositoryUpdate,
   createObjectType,
   createObjectWithMetafields,
+  updateObjectWithMetafields,
+  getObjectTypesWithMetafields,
+  searchObjects,
+  uploadMedia,
   type DeploymentLog,
 } from '../api/dashboard.js';
 import * as api from '../api/dashboard.js';
@@ -391,11 +395,9 @@ function createSlug(title: string): string {
  * Install content (object types and demo objects) to Cosmic
  */
 async function installContentToCosmic(
-  sdk: ReturnType<typeof getSDKClient>,
   extractedContent: ExtractedContent,
   rl: readline.Interface
 ): Promise<{ added: boolean; nextAction: 'build' | 'content' | 'exit' | null }> {
-  if (!sdk) return { added: false, nextAction: null };
 
   const { objectTypes, demoObjects } = extractedContent;
   const totalTypes = objectTypes.length;
@@ -476,6 +478,28 @@ async function installContentToCosmic(
     // Build a map of object type metafields for enriching demo objects
     // This is similar to what the Dashboard's CombinedModelDemoButton does
     const objectTypeMetafieldsMap: Map<string, Map<string, Record<string, unknown>>> = new Map();
+
+    // IMPROVED: First, fetch existing object types from the bucket (like the Dashboard does)
+    // This ensures we have the complete metafields map including existing types
+    try {
+      spinner.update('Loading object types from bucket...');
+      const existingTypes = await getObjectTypesWithMetafields(bucketSlug);
+      for (const type of existingTypes) {
+        if (type.slug && Array.isArray(type.metafields)) {
+          const metafieldMap = new Map<string, Record<string, unknown>>();
+          for (const mf of type.metafields as Record<string, unknown>[]) {
+            if (mf.key) {
+              metafieldMap.set(mf.key as string, mf);
+            }
+          }
+          objectTypeMetafieldsMap.set(type.slug, metafieldMap);
+        }
+      }
+    } catch (err) {
+      // Continue with just the new object types if fetching fails
+    }
+
+    // Also add the newly created object types to the map
     for (const type of objectTypes) {
       const typeData = type as { slug?: string; metafields?: Record<string, unknown>[] };
       if (typeData.slug && Array.isArray(typeData.metafields)) {
@@ -493,6 +517,13 @@ async function installContentToCosmic(
     let objectsAdded = 0;
     let objectsSkipped = 0;
     const objectErrors: string[] = [];
+
+    // IMPROVED: Track successful installs for object reference resolution (like Dashboard does)
+    const successfulInstalls: Array<{
+      object: Record<string, unknown>;
+      id: string;
+      insertPayload: Record<string, unknown>;
+    }> = [];
 
     for (const obj of demoObjects) {
       try {
@@ -524,7 +555,8 @@ async function installContentToCosmic(
             type: string;
             value?: unknown;
             required?: boolean;
-            options?: Array<{ key?: string; value: string }>;
+            options?: Array<{ key?: string; value: string }> | unknown;
+            object_type?: string;
           }>;
         } = {
           title: objTyped.title || 'Untitled',
@@ -539,9 +571,13 @@ async function installContentToCosmic(
           // Handle Unsplash URLs
           if (objTyped.thumbnail.includes('images.unsplash.com')) {
             spinner.update(`Uploading image for "${objTyped.title}"...`);
-            const uploaded = await uploadUnsplashImage(objTyped.thumbnail, sdk);
+            const uploaded = await uploadUnsplashImage(objTyped.thumbnail, bucketSlug);
             if (uploaded) {
               insertPayload.thumbnail = uploaded;
+            } else {
+              // IMPROVED: Use fallback image when Unsplash upload fails (like Dashboard does)
+              const fallbackUrl = getRandomFallbackImage();
+              insertPayload.thumbnail = fallbackUrl.replace('https://imgix.cosmicjs.com/', '');
             }
           } else if (objTyped.thumbnail.includes('imgix.cosmicjs.com')) {
             insertPayload.thumbnail = objTyped.thumbnail.replace('https://imgix.cosmicjs.com/', '');
@@ -555,12 +591,12 @@ async function installContentToCosmic(
           const metafieldsWithIds = addIdsToMetafields(objTyped.metafields);
 
           // Process metafield images (upload Unsplash/external images to Cosmic)
-          const processedMetafields = await processMetafieldImages(metafieldsWithIds, sdk);
+          const processedMetafields = await processMetafieldImages(metafieldsWithIds, bucketSlug);
 
           // Get the object type metafields map for this object's type
           const typeMetafields = objectTypeMetafieldsMap.get(objTyped.type || '');
 
-          // Format for API and copy options from object type (like the Dashboard does)
+          // Format for API and copy options/object_type from object type (like the Dashboard does)
           insertPayload.metafields = processedMetafields.map(mf => {
             const metafield = mf as Record<string, unknown>;
             const key = metafield.key as string;
@@ -588,7 +624,149 @@ async function installContentToCosmic(
               }
             }
 
+            // For object and objects type, copy object_type from the object type metafield
+            // This is critical for object relationship metafields
+            if ((type === 'object' || type === 'objects') && typeMetafields) {
+              const objectTypeMetafield = typeMetafields.get(key);
+              if (objectTypeMetafield?.object_type) {
+                formattedMetafield.object_type = objectTypeMetafield.object_type;
+              } else if (metafield.object_type) {
+                // Fall back to object_type from the AI response if present
+                formattedMetafield.object_type = metafield.object_type;
+              }
+            }
+
             return formattedMetafield as {
+              id?: string;
+              title?: string;
+              key: string;
+              type: string;
+              value?: unknown;
+              required?: boolean;
+              object_type?: string;
+            };
+          });
+        } else if (objTyped.metadata && typeof objTyped.metadata === 'object') {
+          // Handle metadata object format (convert to metafields array)
+          const metafieldsFromMetadata: Record<string, unknown>[] = [];
+
+          // Get the object type metafields map for this object's type
+          // This is CRITICAL for determining if fields are object/objects type
+          const typeMetafields = objectTypeMetafieldsMap.get(objTyped.type || '');
+
+          if (process.env.COSMIC_DEBUG) {
+            console.log(`\n[DEBUG] Processing metadata for object type "${objTyped.type}"`);
+            console.log(`[DEBUG] Has type metafields map: ${!!typeMetafields}`);
+            if (typeMetafields) {
+              const keys = Array.from(typeMetafields.keys());
+              console.log(`[DEBUG] Object type has ${keys.length} metafields: ${keys.join(', ')}`);
+            }
+          }
+
+          for (const [key, value] of Object.entries(objTyped.metadata as Record<string, unknown>)) {
+            // IMPROVED: First check if the object type defines this field's type
+            // This is critical for object/objects type metafields
+            let fieldType = 'text';
+            let objectType: string | undefined;
+            let options: unknown;
+
+            // Check if the object type has a definition for this metafield
+            if (typeMetafields) {
+              const objectTypeMetafield = typeMetafields.get(key);
+              if (objectTypeMetafield) {
+                // Use the type from the object type definition
+                fieldType = objectTypeMetafield.type as string || 'text';
+                // For object/objects type, also get the object_type property
+                if (fieldType === 'object' || fieldType === 'objects') {
+                  objectType = objectTypeMetafield.object_type as string;
+
+                  if (process.env.COSMIC_DEBUG) {
+                    console.log(`[DEBUG] Field "${key}" is type "${fieldType}" referencing "${objectType}"`);
+                  }
+                }
+                // For select-dropdown, check-boxes, radio-buttons, get options
+                if (objectTypeMetafield.options) {
+                  options = objectTypeMetafield.options;
+                }
+                // Debug for file/files types
+                if (process.env.COSMIC_DEBUG && (fieldType === 'file' || fieldType === 'files')) {
+                  console.log(`[DEBUG] Field "${key}" is type "${fieldType}" (from object type definition)`);
+                }
+              } else if (process.env.COSMIC_DEBUG) {
+                console.log(`[DEBUG] Field "${key}" not found in object type metafields, will use fallback type detection`);
+              }
+            }
+
+            // Fall back to guessing type if not found in object type definition
+            if (fieldType === 'text') {
+              // IMPROVED: Check if value is an array first for multi-value fields
+              if (Array.isArray(value)) {
+                if (key.includes('image') || key.includes('photo') || key.includes('gallery') || key.includes('pictures')) {
+                  fieldType = 'files'; // Multiple images
+
+                  if (process.env.COSMIC_DEBUG) {
+                    console.log(`[DEBUG] Field "${key}" detected as type "files" (array of images, ${(value as unknown[]).length} items)`);
+                  }
+                }
+              } else if (key.includes('image') || key.includes('photo') || key.includes('thumbnail') || key.includes('featured')) {
+                fieldType = 'file'; // Single image
+              } else if (key.includes('content') || key.includes('body') || key.includes('description')) {
+                fieldType = 'html-textarea';
+              } else if (key.includes('date')) {
+                fieldType = 'date';
+              } else if (typeof value === 'boolean') {
+                fieldType = 'switch';
+              }
+            }
+
+            const metafieldEntry: Record<string, unknown> = {
+              key,
+              type: fieldType,
+              title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+              value,
+              required: false,
+            };
+
+            // Add object_type for object/objects metafields
+            if (objectType) {
+              metafieldEntry.object_type = objectType;
+            }
+
+            // Add options for select-dropdown, check-boxes, radio-buttons
+            if (options) {
+              metafieldEntry.options = options;
+            }
+
+            metafieldsFromMetadata.push(metafieldEntry);
+          }
+
+          // Add IDs and process images
+          const metafieldsWithIds = addIdsToMetafields(metafieldsFromMetadata);
+          const processedMetafields = await processMetafieldImages(metafieldsWithIds, bucketSlug);
+
+          // Format for API
+          insertPayload.metafields = processedMetafields.map(mf => {
+            const metafield = mf as Record<string, unknown>;
+            const formattedMf: Record<string, unknown> = {
+              id: metafield.id as string,
+              title: metafield.title as string || (metafield.key as string).charAt(0).toUpperCase() + (metafield.key as string).slice(1).replace(/_/g, ' '),
+              key: metafield.key as string,
+              type: metafield.type as string,
+              value: metafield.value,
+              required: metafield.required as boolean,
+            };
+
+            // Include object_type for object/objects metafields
+            if (metafield.object_type) {
+              formattedMf.object_type = metafield.object_type;
+            }
+
+            // Include options for select-dropdown, etc.
+            if (metafield.options) {
+              formattedMf.options = metafield.options;
+            }
+
+            return formattedMf as {
               id?: string;
               title?: string;
               key: string;
@@ -597,55 +775,33 @@ async function installContentToCosmic(
               required?: boolean;
             };
           });
-        } else if (objTyped.metadata && typeof objTyped.metadata === 'object') {
-          // Handle metadata object format (convert to metafields array)
-          const metafieldsFromMetadata: Record<string, unknown>[] = [];
-
-          for (const [key, value] of Object.entries(objTyped.metadata as Record<string, unknown>)) {
-            // Determine field type based on key name and value
-            let fieldType = 'text';
-            if (key.includes('image') || key.includes('photo') || key.includes('thumbnail') || key.includes('featured')) {
-              fieldType = 'file';
-            } else if (key.includes('content') || key.includes('body') || key.includes('description')) {
-              fieldType = 'html-textarea';
-            } else if (key.includes('date')) {
-              fieldType = 'date';
-            } else if (typeof value === 'boolean') {
-              fieldType = 'switch';
-            }
-
-            metafieldsFromMetadata.push({
-              key,
-              type: fieldType,
-              title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
-              value,
-              required: false,
-            });
-          }
-
-          // Add IDs and process images
-          const metafieldsWithIds = addIdsToMetafields(metafieldsFromMetadata);
-          const processedMetafields = await processMetafieldImages(metafieldsWithIds, sdk);
-
-          // Format for API
-          insertPayload.metafields = processedMetafields.map(mf => {
-            const metafield = mf as Record<string, unknown>;
-            return {
-              id: metafield.id as string,
-              title: metafield.title as string || (metafield.key as string).charAt(0).toUpperCase() + (metafield.key as string).slice(1).replace(/_/g, ' '),
-              key: metafield.key as string,
-              type: metafield.type as string,
-              value: metafield.value,
-              required: metafield.required as boolean,
-            };
-          });
         }
 
         spinner.update(`Adding "${objTyped.title}"...`);
 
+        // Debug: Log metafields with object/objects type
+        if (process.env.COSMIC_DEBUG) {
+          const objectMetafields = insertPayload.metafields?.filter(
+            mf => mf.type === 'object' || mf.type === 'objects'
+          );
+          if (objectMetafields && objectMetafields.length > 0) {
+            console.log(`\n[DEBUG] Object "${objTyped.title}" has ${objectMetafields.length} reference metafield(s):`);
+            for (const mf of objectMetafields) {
+              console.log(`  - ${mf.key} (type: ${mf.type}, value: ${JSON.stringify(mf.value)})`);
+            }
+          }
+        }
+
         // Use DAPI endpoint like the dashboard
-        await createObjectWithMetafields(bucketSlug, insertPayload);
+        const createdObject = await createObjectWithMetafields(bucketSlug, insertPayload);
         objectsAdded++;
+
+        // IMPROVED: Track successful installs for object reference resolution
+        successfulInstalls.push({
+          object: insertPayload,
+          id: createdObject.id,
+          insertPayload,
+        });
       } catch (err) {
         const errorMsg = (err as Error).message;
         // Check if object already exists
@@ -655,6 +811,18 @@ async function installContentToCosmic(
           objectErrors.push(`${(obj as { title?: string }).title || 'unknown'}: ${errorMsg}`);
         }
       }
+    }
+
+    // IMPROVED: Update object references (convert slugs to object IDs) like Dashboard does
+    // This is critical for object and objects type metafields that reference other objects by slug
+    if (successfulInstalls.length > 0) {
+      spinner.update('Updating object references...');
+
+      if (process.env.COSMIC_DEBUG) {
+        console.log(`\n[DEBUG] Starting object reference updates for ${successfulInstalls.length} objects`);
+      }
+
+      await updateObjectReferences(bucketSlug, successfulInstalls);
     }
 
     spinner.stop();
@@ -712,14 +880,243 @@ async function installContentToCosmic(
 }
 
 /**
+ * Update object references after creation (convert slugs to object IDs)
+ * This is a critical function that the Dashboard uses to ensure object relationship metafields
+ * (type: "object" and type: "objects") have correct object IDs instead of slugs.
+ * 
+ * When the AI generates demo objects with references like:
+ *   { "type": "object", "key": "author", "value": "john-doe" }  // slug reference
+ * 
+ * This function updates them to:
+ *   { "type": "object", "key": "author", "value": "64abc123def..." }  // actual object ID
+ */
+async function updateObjectReferences(
+  bucketSlug: string,
+  successfulInstalls: Array<{
+    object: Record<string, unknown>;
+    id: string;
+    insertPayload: Record<string, unknown>;
+  }>
+): Promise<void> {
+  try {
+    // Create a map of slugs to object IDs for quick lookup
+    const slugToIdMap: Record<string, string> = {};
+
+    // First build a map of all slugs to their corresponding object IDs
+    for (const { insertPayload, id } of successfulInstalls) {
+      const slug = insertPayload.slug as string;
+      if (slug) {
+        slugToIdMap[slug] = id;
+      }
+    }
+
+    if (process.env.COSMIC_DEBUG) {
+      console.log('[DEBUG] Built slug-to-ID map:', JSON.stringify(slugToIdMap, null, 2));
+    }
+
+    // Cache for existing objects fetched by slug to avoid repeated API calls
+    const slugCache: Record<string, string | null> = {};
+
+    // Helper function to get an object ID from a slug
+    const getObjectIdFromSlug = async (slug: string): Promise<string | null> => {
+      // If already in our map of newly created objects, return that ID
+      if (slugToIdMap[slug]) {
+        if (process.env.COSMIC_DEBUG) {
+          console.log(`[DEBUG] Found slug "${slug}" in newly created objects: ${slugToIdMap[slug]}`);
+        }
+        return slugToIdMap[slug];
+      }
+
+      // If we've already looked up this slug, return from cache
+      if (slugCache[slug] !== undefined) {
+        if (process.env.COSMIC_DEBUG) {
+          console.log(`[DEBUG] Found slug "${slug}" in cache: ${slugCache[slug]}`);
+        }
+        return slugCache[slug];
+      }
+
+      // Try to fetch the object by slug if it's not one we just created
+      try {
+        if (process.env.COSMIC_DEBUG) {
+          console.log(`[DEBUG] Searching for object with slug: "${slug}"`);
+        }
+
+        const result = await searchObjects(bucketSlug, { slug }, { limit: 1 });
+
+        if (result.objects && result.objects.length > 0) {
+          const objectId = result.objects[0].id;
+          slugCache[slug] = objectId;
+
+          if (process.env.COSMIC_DEBUG) {
+            console.log(`[DEBUG] Found object with slug "${slug}": ${objectId}`);
+          }
+
+          return objectId;
+        } else {
+          slugCache[slug] = null;
+
+          if (process.env.COSMIC_DEBUG) {
+            console.log(`[DEBUG] No object found with slug "${slug}"`);
+          }
+
+          return null;
+        }
+      } catch (error) {
+        slugCache[slug] = null;
+
+        if (process.env.COSMIC_DEBUG) {
+          console.log(`[DEBUG] Error searching for slug "${slug}": ${(error as Error).message}`);
+        }
+
+        return null;
+      }
+    };
+
+    // Now update each object with proper references
+    for (const { insertPayload, id } of successfulInstalls) {
+      const metafields = insertPayload.metafields as Array<{
+        id?: string;
+        title?: string;
+        key: string;
+        type: string;
+        value?: unknown;
+        required?: boolean;
+        options?: unknown;
+        object_type?: string;
+      }> | undefined;
+
+      if (!metafields || !Array.isArray(metafields)) {
+        if (process.env.COSMIC_DEBUG) {
+          console.log(`[DEBUG] Object ${id} has no metafields array, skipping`);
+        }
+        continue;
+      }
+
+      // Check if any metafields need reference resolution
+      const needsUpdate = metafields.some(
+        (metafield) =>
+          (metafield.type === 'object' && typeof metafield.value === 'string') ||
+          (metafield.type === 'objects' &&
+            Array.isArray(metafield.value) &&
+            (metafield.value as unknown[]).some((val) => typeof val === 'string'))
+      );
+
+      if (process.env.COSMIC_DEBUG) {
+        const title = insertPayload.title;
+        console.log(`\n[DEBUG] Checking object "${title}" (${id})`);
+        console.log(`[DEBUG] Has ${metafields.length} metafields, needsUpdate: ${needsUpdate}`);
+
+        // Log all object/objects type metafields
+        const refMetafields = metafields.filter(mf => mf.type === 'object' || mf.type === 'objects');
+        if (refMetafields.length > 0) {
+          console.log('[DEBUG] Reference metafields:');
+          for (const mf of refMetafields) {
+            console.log(`  - ${mf.key}: type=${mf.type}, value=${JSON.stringify(mf.value)}`);
+          }
+        }
+      }
+
+      if (needsUpdate) {
+        // Clone the metafields to avoid modifying the original
+        const updatedMetafields = metafields.map(mf => ({ ...mf }));
+
+        // Flag to track if any value was actually updated
+        let valuesUpdated = false;
+
+        // Process each metafield
+        for (let i = 0; i < updatedMetafields.length; i++) {
+          const metafield = updatedMetafields[i];
+
+          // Handle 'object' type (single reference)
+          if (metafield.type === 'object' && typeof metafield.value === 'string') {
+            const originalSlug = metafield.value;
+            const objectId = await getObjectIdFromSlug(metafield.value);
+
+            if (objectId) {
+              metafield.value = objectId;
+              valuesUpdated = true;
+
+              if (process.env.COSMIC_DEBUG) {
+                console.log(`[DEBUG] Updated ${metafield.key}: "${originalSlug}" -> "${objectId}"`);
+              }
+            } else if (process.env.COSMIC_DEBUG) {
+              console.log(`[DEBUG] Could not resolve ${metafield.key}: "${originalSlug}" (no object found)`);
+            }
+          }
+
+          // Handle 'objects' type (multiple references)
+          if (metafield.type === 'objects' && Array.isArray(metafield.value)) {
+            const updatedValues: (string | unknown)[] = [];
+            let arrayUpdated = false;
+
+            for (const val of metafield.value as unknown[]) {
+              if (typeof val === 'string') {
+                // Looks like a slug, try to resolve it
+                const objectId = await getObjectIdFromSlug(val);
+                if (objectId) {
+                  updatedValues.push(objectId);
+                  arrayUpdated = true;
+                } else {
+                  updatedValues.push(val); // Keep original if not found
+                }
+              } else {
+                updatedValues.push(val); // Keep original value
+              }
+            }
+
+            if (arrayUpdated) {
+              metafield.value = updatedValues;
+              valuesUpdated = true;
+            }
+          }
+        }
+
+        // Only update the object if any references were actually updated
+        if (valuesUpdated) {
+          try {
+            if (process.env.COSMIC_DEBUG) {
+              console.log(`[DEBUG] Updating object ${id} with resolved references`);
+            }
+
+            // Prepare the update object with all necessary fields
+            await updateObjectWithMetafields(bucketSlug, id, {
+              title: insertPayload.title as string,
+              slug: insertPayload.slug as string,
+              content: (insertPayload.content as string) || '',
+              status: (insertPayload.status as string) || 'published',
+              metafields: updatedMetafields,
+            });
+
+            if (process.env.COSMIC_DEBUG) {
+              console.log(`[DEBUG] Successfully updated object ${id}`);
+            }
+          } catch (error) {
+            if (process.env.COSMIC_DEBUG) {
+              console.log(`[DEBUG] Failed to update object ${id}: ${(error as Error).message}`);
+            }
+            // Silent fail for reference updates - object is already created
+          }
+        } else if (process.env.COSMIC_DEBUG) {
+          console.log(`[DEBUG] No values updated for object ${id}, skipping update`);
+        }
+      }
+    }
+  } catch (error) {
+    if (process.env.COSMIC_DEBUG) {
+      console.log(`[DEBUG] Error in updateObjectReferences: ${(error as Error).message}`);
+    }
+    // Silent fail for reference updates - objects are already created
+  }
+}
+
+/**
  * Upload an image from URL (Unsplash) to Cosmic media library
+ * Uses Dashboard API (Workers) for parity with the dashboard
  */
 async function uploadUnsplashImage(
   imageUrl: string,
-  sdk: ReturnType<typeof getSDKClient>
+  bucketSlug: string
 ): Promise<string | null> {
-  if (!sdk) return null;
-
   try {
     // Fetch the image
     const response = await fetch(imageUrl);
@@ -737,15 +1134,13 @@ async function uploadUnsplashImage(
     const filenameBase = pathParts[pathParts.length - 1] || `image-${Date.now()}`;
     const filename = `${filenameBase}-${Date.now()}.jpg`;
 
-    // Upload to Cosmic
-    const result = await sdk.media.insertOne({
-      media: buffer,
+    // Upload to Cosmic via Dashboard API (like the dashboard does)
+    const media = await uploadMedia(bucketSlug, {
+      buffer,
       filename,
       contentType: 'image/jpeg',
     });
-
-    const mediaResult = result as { media?: { name?: string } };
-    return mediaResult.media?.name || null;
+    return media.name || null;
   } catch (error) {
     console.log(chalk.dim(`  Error uploading image: ${(error as Error).message}`));
     return null;
@@ -768,7 +1163,7 @@ function extractImageUrl(value: unknown): string | null {
     return null;
   }
 
-  // Object with url or imgix_url property
+  // Object with url or imgix_url property (e.g. {url, imgix_url} from Cosmic API)
   if (typeof value === 'object') {
     const obj = value as Record<string, unknown>;
     const url = obj.url || obj.imgix_url;
@@ -781,13 +1176,24 @@ function extractImageUrl(value: unknown): string | null {
 }
 
 /**
+ * Get the URL to fetch for upload - extracts inner Unsplash URL from cdn.cosmicjs.com wrapper
+ */
+function getUploadUrl(imageUrl: string): string {
+  // cdn.cosmicjs.com wraps URLs: https://cdn.cosmicjs.com/https://images.unsplash.com/...
+  const cdnMatch = imageUrl.match(/https:\/\/cdn\.cosmicjs\.com\/(https:\/\/images\.unsplash\.com\/.+)/);
+  if (cdnMatch) {
+    return cdnMatch[1];
+  }
+  return imageUrl;
+}
+
+/**
  * Process metafield values and upload any images to Cosmic
  */
 async function processMetafieldImages(
   metafields: Record<string, unknown>[],
-  sdk: ReturnType<typeof getSDKClient>
+  bucketSlug: string
 ): Promise<Record<string, unknown>[]> {
-  if (!sdk) return metafields;
 
   const processedMetafields = [];
 
@@ -808,12 +1214,13 @@ async function processMetafieldImages(
         // Check if it's an external URL that needs uploading
         if (imageUrl.includes('images.unsplash.com')) {
           spinner.update(`Uploading image for "${fieldKey}"...`);
-          const uploadedName = await uploadUnsplashImage(imageUrl, sdk);
+          const uploadedName = await uploadUnsplashImage(imageUrl, bucketSlug);
           if (uploadedName) {
             metafield.value = uploadedName;
           } else {
-            // Clear the value if upload failed
-            metafield.value = '';
+            // IMPROVED: Use fallback image when upload fails (like Dashboard does)
+            const fallbackUrl = getRandomFallbackImage();
+            metafield.value = fallbackUrl.replace('https://imgix.cosmicjs.com/', '');
           }
         } else if (imageUrl.includes('imgix.cosmicjs.com')) {
           // Extract just the filename from imgix URL
@@ -826,11 +1233,13 @@ async function processMetafieldImages(
             const innerUrl = match[1];
             if (innerUrl.startsWith('https://images.unsplash.com')) {
               spinner.update(`Uploading image for "${fieldKey}"...`);
-              const uploadedName = await uploadUnsplashImage(innerUrl, sdk);
+              const uploadedName = await uploadUnsplashImage(innerUrl, bucketSlug);
               if (uploadedName) {
                 metafield.value = uploadedName;
               } else {
-                metafield.value = '';
+                // IMPROVED: Use fallback image when upload fails
+                const fallbackUrl = getRandomFallbackImage();
+                metafield.value = fallbackUrl.replace('https://imgix.cosmicjs.com/', '');
               }
             } else {
               metafield.value = innerUrl;
@@ -844,20 +1253,48 @@ async function processMetafieldImages(
     else if (fieldType === 'files' && Array.isArray(metafield.value)) {
       const processedValues: string[] = [];
 
+      if (process.env.COSMIC_DEBUG) {
+        console.log(`[DEBUG] Processing files type metafield "${fieldKey}" with ${(metafield.value as unknown[]).length} items`);
+      }
+
       for (const item of metafield.value as unknown[]) {
         const imageUrl = extractImageUrl(item);
 
         if (imageUrl) {
-          if (imageUrl.includes('images.unsplash.com')) {
+          const needsUpload = imageUrl.includes('images.unsplash.com') || imageUrl.includes('cdn.cosmicjs.com');
+
+          if (process.env.COSMIC_DEBUG) {
+            console.log(`[DEBUG]   Item URL: ${imageUrl}, needsUpload: ${needsUpload}`);
+          }
+
+          if (needsUpload) {
+            const uploadUrl = getUploadUrl(imageUrl);
+
+            if (process.env.COSMIC_DEBUG) {
+              console.log(`[DEBUG]   Upload URL (after unwrap): ${uploadUrl}`);
+            }
+
             spinner.update(`Uploading image for "${fieldKey}"...`);
-            const uploadedName = await uploadUnsplashImage(imageUrl, sdk);
+            const uploadedName = await uploadUnsplashImage(uploadUrl, bucketSlug);
+
+            if (process.env.COSMIC_DEBUG) {
+              console.log(`[DEBUG]   Uploaded as: ${uploadedName || 'FAILED'}`);
+            }
+
             if (uploadedName) {
               processedValues.push(uploadedName);
+            } else {
+              // IMPROVED: Use fallback image when upload fails
+              const fallbackUrl = getRandomFallbackImage();
+              processedValues.push(fallbackUrl.replace('https://imgix.cosmicjs.com/', ''));
             }
           } else if (imageUrl.includes('imgix.cosmicjs.com')) {
             processedValues.push(imageUrl.replace('https://imgix.cosmicjs.com/', ''));
-          } else if (typeof item === 'string') {
-            processedValues.push(item);
+          } else if (imageUrl.includes('cdn.cosmicjs.com')) {
+            const match = imageUrl.match(/https:\/\/cdn\.cosmicjs\.com\/(.+)/);
+            processedValues.push(match ? match[1] : imageUrl);
+          } else {
+            processedValues.push(typeof item === 'string' ? item : imageUrl);
           }
         } else if (typeof item === 'string') {
           processedValues.push(item);
@@ -909,7 +1346,6 @@ function detectCosmicContentMention(content: string): boolean {
  * Offer to generate and add content to Cosmic after a repo update
  */
 async function offerContentGeneration(
-  sdk: ReturnType<typeof getSDKClient>,
   aiResponse: string,
   conversationHistory: Array<{ role: string; content: string }>,
   model: string,
@@ -985,7 +1421,7 @@ Generate complete, realistic content that matches what the code expects. Include
     if (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0) {
       // Override hasAddContent since we know we want to add
       extractedContent.hasAddContent = true;
-      const result = await installContentToCosmic(sdk, extractedContent, rl);
+      const result = await installContentToCosmic(extractedContent, rl);
       return result.added;
     } else {
       console.log(chalk.yellow('  Could not generate content metadata.'));
@@ -1178,13 +1614,13 @@ async function pollDeploymentStatus(
  */
 async function processUnsplashUrls(
   obj: Record<string, unknown>,
-  sdk: ReturnType<typeof getSDKClient>,
+  bucketSlug: string,
   objectTypeMetafields: Record<string, unknown>[]
 ): Promise<void> {
   // Process thumbnail
   if (typeof obj.thumbnail === 'string' && obj.thumbnail.includes('images.unsplash.com')) {
     console.log(chalk.dim(`  Uploading thumbnail image...`));
-    const mediaName = await uploadUnsplashImage(obj.thumbnail, sdk);
+    const mediaName = await uploadUnsplashImage(obj.thumbnail, bucketSlug);
     if (mediaName) {
       obj.thumbnail = mediaName;
     } else {
@@ -1209,7 +1645,7 @@ async function processUnsplashUrls(
         value.includes('images.unsplash.com')
       ) {
         console.log(chalk.dim(`  Uploading ${key} image...`));
-        const mediaName = await uploadUnsplashImage(value, sdk);
+        const mediaName = await uploadUnsplashImage(value, bucketSlug);
         if (mediaName) {
           metadata[key] = mediaName;
         } else {
@@ -1218,24 +1654,36 @@ async function processUnsplashUrls(
         }
       }
 
-      // Handle files type (array) with Unsplash URLs
-      if (
-        metafieldDef?.type === 'files' &&
-        Array.isArray(value)
-      ) {
+      // Handle files type (array) - supports both string URLs and {url, imgix_url} objects
+      const isFilesType = metafieldDef?.type === 'files' ||
+        (['photos', 'images', 'gallery'].includes(key) && Array.isArray(value));
+      if (isFilesType && Array.isArray(value)) {
         const processedFiles: string[] = [];
-        for (const fileUrl of value) {
-          if (typeof fileUrl === 'string' && fileUrl.includes('images.unsplash.com')) {
-            console.log(chalk.dim(`  Uploading ${key} image...`));
-            const mediaName = await uploadUnsplashImage(fileUrl, sdk);
-            if (mediaName) {
-              processedFiles.push(mediaName);
+        for (const item of value) {
+          const imageUrl = extractImageUrl(item);
+          if (imageUrl) {
+            const needsUpload = imageUrl.includes('images.unsplash.com') ||
+              imageUrl.includes('cdn.cosmicjs.com');
+            if (needsUpload) {
+              const uploadUrl = getUploadUrl(imageUrl);
+              console.log(chalk.dim(`  Uploading ${key} image...`));
+              const mediaName = await uploadUnsplashImage(uploadUrl, bucketSlug);
+              if (mediaName) {
+                processedFiles.push(mediaName);
+              } else {
+                const fallback = getRandomFallbackImage();
+                processedFiles.push(fallback.replace('https://imgix.cosmicjs.com/', ''));
+              }
+            } else if (imageUrl.includes('imgix.cosmicjs.com')) {
+              processedFiles.push(imageUrl.replace('https://imgix.cosmicjs.com/', ''));
+            } else if (imageUrl.includes('cdn.cosmicjs.com')) {
+              const match = imageUrl.match(/https:\/\/cdn\.cosmicjs\.com\/(.+)/);
+              processedFiles.push(match ? match[1] : imageUrl);
             } else {
-              const fallback = getRandomFallbackImage();
-              processedFiles.push(fallback.replace('https://imgix.cosmicjs.com/', ''));
+              processedFiles.push(typeof item === 'string' ? item : imageUrl);
             }
-          } else {
-            processedFiles.push(fileUrl as string);
+          } else if (typeof item === 'string') {
+            processedFiles.push(item);
           }
         }
         metadata[key] = processedFiles;
@@ -1940,7 +2388,7 @@ Generate complete, realistic content that matches what the code expects.` }],
             // Extract and install the content
             const extractedContent = extractContentFromResponse(fullResponse);
             if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-              const result = await installContentToCosmic(sdk, extractedContent, rl);
+              const result = await installContentToCosmic(extractedContent, rl);
               if (result.nextAction === 'build') {
                 isBuildMode = true;
                 console.log();
@@ -3330,8 +3778,12 @@ async function executeAction(actionJson: string): Promise<string> {
 
             try {
               // Process Unsplash URLs in thumbnail and metadata
+              const bucketSlugForUpload = getCurrentBucketSlug();
+              if (!bucketSlugForUpload) {
+                throw new Error('No bucket selected');
+              }
               const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
-              await processUnsplashUrls(obj, sdkClient, metafields);
+              await processUnsplashUrls(obj, bucketSlugForUpload, metafields);
 
               // Build the object data
               const insertPayload: Record<string, unknown> = {
@@ -3522,7 +3974,10 @@ async function executeAction(actionJson: string): Promise<string> {
                   const objTitle = created.title as string;
 
                   try {
-                    await sdkClient.objects.updateOne(objId, { metadata: updates });
+                    // Merge updates with existing metadata - don't replace entire metadata
+                    const currentMetadata = (created.metadata as Record<string, unknown>) || {};
+                    const mergedMetadata = { ...currentMetadata, ...updates };
+                    await sdkClient.objects.updateOne(objId, { metadata: mergedMetadata });
                     refsUpdated++;
                   } catch {
                     console.log(chalk.yellow(`  ⚠ Could not update references for "${objTitle}"`));
@@ -4075,7 +4530,7 @@ async function processMessage(
         // Check if AI response contains content to add to Cosmic CMS
         const extractedContent = extractContentFromResponse(fullText);
         if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-          const result = await installContentToCosmic(sdk, extractedContent, rl);
+          const result = await installContentToCosmic(extractedContent, rl);
           if (result.nextAction === 'build') {
             isBuildMode = true;
             isRepoMode = false;
@@ -4101,7 +4556,7 @@ async function processMessage(
           const cosmicContentMentioned = detectCosmicContentMention(fullText);
           if (cosmicContentMentioned) {
             // Offer to generate the content
-            await offerContentGeneration(sdk, fullText, conversationHistory, model, bucketSlug, rl);
+            await offerContentGeneration(fullText, conversationHistory, model, bucketSlug, rl);
           }
         }
       } else {
@@ -4220,7 +4675,7 @@ async function processMessage(
         // Check if AI response contains content to add to Cosmic CMS (metadata marker format)
         const extractedContent = extractContentFromResponse(fullText);
         if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-          const contentResult = await installContentToCosmic(sdk, extractedContent, rl);
+          const contentResult = await installContentToCosmic(extractedContent, rl);
           if (contentResult.nextAction === 'build') {
             isBuildMode = true;
             console.log();
@@ -4620,7 +5075,7 @@ async function processMessage(
               // Check if AI response contains content to add to Cosmic CMS (build mode)
               const extractedContent = extractContentFromResponse(response.text);
               if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-                const contentResult = await installContentToCosmic(sdk, extractedContent, rl);
+                const contentResult = await installContentToCosmic(extractedContent, rl);
                 if (contentResult.nextAction === 'exit') {
                   console.log(chalk.dim('  Goodbye!'));
                   rl.close();
@@ -4642,7 +5097,7 @@ async function processMessage(
               // Check if AI response contains content to add to Cosmic CMS (build mode - no deploy)
               const extractedContent = extractContentFromResponse(response.text);
               if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
-                const contentResult = await installContentToCosmic(sdk, extractedContent, rl);
+                const contentResult = await installContentToCosmic(extractedContent, rl);
                 if (contentResult.nextAction === 'exit') {
                   console.log(chalk.dim('  Goodbye!'));
                   rl.close();

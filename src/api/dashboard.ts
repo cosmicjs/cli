@@ -347,6 +347,101 @@ export async function createObjectWithMetafields(
   return response.object;
 }
 
+/**
+ * Update an existing object with full metafields support using DAPI
+ * Used for updating object references after creation (slug -> object ID conversion)
+ * 
+ * IMPORTANT: This matches the exact format used by the dashboard's editObjectRequest:
+ * - slug: bucket slug
+ * - object_id: the object's ID (not "id")
+ * - data: the object data (wrapped, not spread)
+ */
+export async function updateObjectWithMetafields(
+  bucketSlug: string,
+  objectId: string,
+  object: {
+    title?: string;
+    slug?: string;
+    content?: string;
+    status?: string;
+    thumbnail?: string;
+    metafields?: Array<{
+      id?: string;
+      title?: string;
+      key: string;
+      type: string;
+      value?: unknown;
+      required?: boolean;
+      options?: unknown;
+      object_type?: string;
+    }>;
+  }
+): Promise<CosmicObject> {
+  // Match the exact format used by the dashboard's editObjectRequest
+  const response = await patch<{ object: CosmicObject }>(
+    '/objects/update',
+    {
+      slug: bucketSlug,
+      object_id: objectId,
+      data: object,
+    }
+  );
+  return response.object;
+}
+
+/**
+ * Get object types with full metafields (including IDs) from bucket
+ * This is needed for building a complete metafields map for demo object creation
+ * Matches the dashboard's fetchSingleBucketRequest + bucket.object_types usage
+ */
+export async function getObjectTypesWithMetafields(bucketSlug: string): Promise<ObjectType[]> {
+  // Use getBucket (same as dashboard's fetchSingleBucketRequest) - returns object_types
+  const bucket = await getBucket(bucketSlug) as unknown as { object_types?: ObjectType[]; objectTypes?: ObjectType[] };
+  // Handle both snake_case (API) and camelCase (some transforms)
+  return bucket.object_types || bucket.objectTypes || [];
+}
+
+/**
+ * Search for objects by query (used for finding objects by slug)
+ * IMPORTANT: The DAPI /objects/list endpoint returns objects in a wrapped structure:
+ * { objects: [{ main_object_status: string, object: ObjectData }], total: number }
+ * We extract the inner object.id for convenience
+ */
+export async function searchObjects(
+  bucketSlug: string,
+  query: Record<string, unknown>,
+  options: { limit?: number; props?: string[] } = {}
+): Promise<{ objects: CosmicObject[]; total: number }> {
+  // Use the same query format as the dashboard: { type: { $exists: true }, slug }
+  const fullQuery = {
+    type: { $exists: true },
+    ...query,
+  };
+
+  const params: Record<string, unknown> = {
+    query: JSON.stringify(fullQuery),
+  };
+  if (options.limit) params.limit = options.limit;
+  if (options.props) params.props = options.props.join(',');
+
+  // The DAPI response wraps objects: [{ main_object_status, object: {...} }]
+  const response = await get<{
+    objects: Array<{ main_object_status?: string; object: CosmicObject }>;
+    total: number
+  }>(
+    '/objects/list',
+    { bucketSlug, params }
+  );
+
+  // Extract the inner object from the wrapped response (like the dashboard does)
+  const objects = (response.objects || []).map(item => item.object);
+
+  return {
+    objects,
+    total: response.total || 0,
+  };
+}
+
 // ============================================================================
 // Media
 // ============================================================================
@@ -388,6 +483,58 @@ export async function getMedia(bucketSlug: string, mediaId: string): Promise<Med
 
 export async function deleteMedia(bucketSlug: string, mediaIds: string[]): Promise<void> {
   await post('/media/deleteByIds', { slug: bucketSlug, media_ids: mediaIds });
+}
+
+/**
+ * Upload media to bucket using Dashboard API (Workers endpoint)
+ * Matches the dashboard's uploadMediaRequest - uses /buckets/{slug}/media-upload
+ * with FormData 'files' field. Requires JWT auth (access token).
+ */
+export async function uploadMedia(
+  bucketSlug: string,
+  params: {
+    buffer: Buffer;
+    filename: string;
+    contentType: string;
+    folder?: string;
+    metadata?: Record<string, unknown>;
+    altText?: string;
+  }
+): Promise<Media> {
+  const { getWorkersUrl } = await import('../config/store.js');
+  const { getAuthHeaders } = await import('../auth/manager.js');
+
+  const workersUrl = getWorkersUrl();
+  const endpoint = `${workersUrl}/buckets/${bucketSlug}/media-upload`;
+  const authHeaders = getAuthHeaders();
+
+  const formData = new FormData();
+  const blob = new Blob([params.buffer], { type: params.contentType });
+  formData.append('files', blob, params.filename);
+  if (params.folder) formData.append('folder', params.folder);
+  if (params.metadata) formData.append('metadata', JSON.stringify(params.metadata));
+  if (params.altText) formData.append('alt_text', params.altText);
+
+  const headers: Record<string, string> = {
+    ...authHeaders,
+    'Origin': 'https://app.cosmicjs.com',
+    'User-Agent': 'CosmicCLI/1.0.0',
+  };
+  // Don't set Content-Type - FormData sets it with boundary
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error((errorData as { message?: string }).message || `Media upload failed: ${response.status}`);
+  }
+
+  const data = (await response.json()) as { media: Media };
+  return data.media;
 }
 
 // ============================================================================
@@ -1515,13 +1662,18 @@ export default {
   deleteObjects,
   publishObjects,
   unpublishObjects,
+  createObjectWithMetafields,
+  updateObjectWithMetafields,
+  searchObjects,
   // Object Types
   listObjectTypes,
   getObjectType,
+  getObjectTypesWithMetafields,
   // Media
   listMedia,
   getMedia,
   deleteMedia,
+  uploadMedia,
   // Workflows
   listWorkflows,
   getWorkflow,
