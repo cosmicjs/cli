@@ -616,7 +616,7 @@ export async function runAgent(
     options,
     { bucketSlug }
   );
-  
+
   // Handle various response formats:
   // - { execution: {...} }
   // - { data: {...} }
@@ -629,7 +629,7 @@ export async function runAgent(
   if (response.data) {
     return response.data;
   }
-  
+
   // Handle flat response with execution_id or id
   const executionId = response.execution_id || response.id || response._id;
   if (executionId) {
@@ -639,7 +639,7 @@ export async function runAgent(
       status: (response.status as AgentExecution['status']) || 'pending',
     };
   }
-  
+
   return response as unknown as AgentExecution;
 }
 
@@ -1112,6 +1112,20 @@ export interface StreamingChatOptions {
   maxTokens?: number;
   viewMode?: 'content-model' | 'build-app';
   selectedObjectTypes?: string[];
+  links?: string[]; // URLs for the backend to crawl for context
+  contextConfig?: {
+    objects?: {
+      enabled: boolean;
+      object_types?: string[];
+      include_models?: boolean;
+      limit?: number;
+      props?: string[];
+    };
+  };
+  metadata?: {
+    chat_mode?: string;
+    [key: string]: unknown;
+  };
   onChunk?: (chunk: string) => void;
   onProgress?: (progress: { stage: string; message?: string; percentage?: number }) => void;
   onComplete?: (fullText: string, messageId?: string) => void;
@@ -1130,6 +1144,9 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
     maxTokens = 32000,
     viewMode = 'build-app',
     selectedObjectTypes = [],
+    links,
+    contextConfig,
+    metadata: extraMetadata,
     onChunk,
     onProgress,
     onComplete,
@@ -1151,18 +1168,19 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
     'User-Agent': 'CosmicCLI/1.0.0',
   };
 
-  const requestPayload = {
+  const requestPayload: Record<string, unknown> = {
     messages,
     model,
     stream: true,
     max_tokens: maxTokens,
     metadata: {
       view_mode: viewMode,
-      chat_mode: 'agent',
+      chat_mode: extraMetadata?.chat_mode || 'agent',
       selected_object_types: selectedObjectTypes,
+      ...extraMetadata,
     },
     // Context configuration - include object types so AI knows bucket structure
-    context: {
+    context: contextConfig || {
       objects: {
         enabled: true,
         object_types: selectedObjectTypes.length > 0 ? selectedObjectTypes : undefined, // undefined = all types
@@ -1177,6 +1195,11 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
       },
     },
   };
+
+  // Add links for URL crawling if provided
+  if (links && links.length > 0) {
+    requestPayload.links = links;
+  }
 
   let fullText = '';
   let messageId: string | undefined;
@@ -1286,6 +1309,7 @@ export interface RepositoryUpdateOptions {
   model?: string;
   maxTokens?: number;
   buildLogs?: string;
+  chatMode?: 'agent' | 'ask';  // ask mode = read-only questions, agent mode = can make changes
   onChunk?: (chunk: string) => void;
   onProgress?: (progress: { stage: string; message?: string; percentage?: number }) => void;
   onComplete?: (fullText: string, requestId?: string) => void;
@@ -1306,6 +1330,7 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
     branch = 'main',
     model = 'claude-opus-4-5-20251101',
     maxTokens = 32000,
+    chatMode = 'agent',  // Default to agent mode (can make changes)
     onChunk,
     onProgress,
     onComplete,
@@ -1344,7 +1369,7 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
     stream: true,
     slug: bucketSlug,
     metadata: {
-      chat_mode: 'repository-update',
+      chat_mode: chatMode,  // 'ask' for read-only questions, 'agent' for making changes
     },
   };
 

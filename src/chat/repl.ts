@@ -84,6 +84,42 @@ function addIdsToMetafields(metafields: Record<string, unknown>[]): Record<strin
   });
 }
 
+/**
+ * Clean response text for display - removes METADATA markers and JSON code blocks
+ */
+function cleanResponseForDisplay(text: string): string {
+  // Remove METADATA markers and everything after them (including JSON blocks)
+  // Pattern matches: <!-- METADATA: {...} --> followed by optional whitespace and ```json...```
+  let cleaned = text;
+
+  // Find the first METADATA marker and truncate there
+  const metadataIndex = cleaned.indexOf('<!-- METADATA');
+  if (metadataIndex !== -1) {
+    cleaned = cleaned.substring(0, metadataIndex);
+  }
+
+  // Also handle partial METADATA (when streaming cuts off)
+  const partialMetadata = cleaned.indexOf('<!-- META');
+  if (partialMetadata !== -1) {
+    cleaned = cleaned.substring(0, partialMetadata);
+  }
+
+  // Clean up trailing whitespace and newlines
+  cleaned = cleaned.trimEnd();
+
+  // Remove excessive newlines (more than 2 consecutive)
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  return cleaned;
+}
+
+/**
+ * Check if text chunk contains start of METADATA marker
+ */
+function containsMetadataMarker(text: string): boolean {
+  return text.includes('<!-- METADATA') || text.includes('<!-- META');
+}
+
 // ============================================================================
 // Content Extraction from AI Response (for "Add Content" feature)
 // ============================================================================
@@ -335,6 +371,7 @@ async function installContentToCosmic(
           thumbnail?: string;
           locale?: string;
           metafields?: Record<string, unknown>[];
+          metadata?: Record<string, unknown>;
         };
 
         // Format object for DAPI (matching dashboard format)
@@ -379,8 +416,56 @@ async function installContentToCosmic(
         }
 
         if (Array.isArray(objTyped.metafields)) {
-          // Add IDs and ensure proper format for each metafield
-          insertPayload.metafields = addIdsToMetafields(objTyped.metafields).map(mf => {
+          // Add IDs to metafields
+          const metafieldsWithIds = addIdsToMetafields(objTyped.metafields);
+
+          // Process metafield images (upload Unsplash/external images to Cosmic)
+          const processedMetafields = await processMetafieldImages(metafieldsWithIds, sdk);
+
+          // Format for API
+          insertPayload.metafields = processedMetafields.map(mf => {
+            const metafield = mf as Record<string, unknown>;
+            return {
+              id: metafield.id as string,
+              title: metafield.title as string || (metafield.key as string).charAt(0).toUpperCase() + (metafield.key as string).slice(1).replace(/_/g, ' '),
+              key: metafield.key as string,
+              type: metafield.type as string,
+              value: metafield.value,
+              required: metafield.required as boolean,
+            };
+          });
+        } else if (objTyped.metadata && typeof objTyped.metadata === 'object') {
+          // Handle metadata object format (convert to metafields array)
+          const metafieldsFromMetadata: Record<string, unknown>[] = [];
+
+          for (const [key, value] of Object.entries(objTyped.metadata as Record<string, unknown>)) {
+            // Determine field type based on key name and value
+            let fieldType = 'text';
+            if (key.includes('image') || key.includes('photo') || key.includes('thumbnail') || key.includes('featured')) {
+              fieldType = 'file';
+            } else if (key.includes('content') || key.includes('body') || key.includes('description')) {
+              fieldType = 'html-textarea';
+            } else if (key.includes('date')) {
+              fieldType = 'date';
+            } else if (typeof value === 'boolean') {
+              fieldType = 'switch';
+            }
+
+            metafieldsFromMetadata.push({
+              key,
+              type: fieldType,
+              title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+              value,
+              required: false,
+            });
+          }
+
+          // Add IDs and process images
+          const metafieldsWithIds = addIdsToMetafields(metafieldsFromMetadata);
+          const processedMetafields = await processMetafieldImages(metafieldsWithIds, sdk);
+
+          // Format for API
+          insertPayload.metafields = processedMetafields.map(mf => {
             const metafield = mf as Record<string, unknown>;
             return {
               id: metafield.id as string,
@@ -502,6 +587,127 @@ async function uploadUnsplashImage(
     console.log(chalk.dim(`  Error uploading image: ${(error as Error).message}`));
     return null;
   }
+}
+
+/**
+ * Extract image URL from metafield value (handles various formats)
+ */
+function extractImageUrl(value: unknown): string | null {
+  if (!value) return null;
+
+  // Direct URL string
+  if (typeof value === 'string') {
+    if (value.includes('images.unsplash.com') ||
+      value.includes('imgix.cosmicjs.com') ||
+      value.includes('cdn.cosmicjs.com')) {
+      return value;
+    }
+    return null;
+  }
+
+  // Object with url or imgix_url property
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const url = obj.url || obj.imgix_url;
+    if (typeof url === 'string') {
+      return url;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Process metafield values and upload any images to Cosmic
+ */
+async function processMetafieldImages(
+  metafields: Record<string, unknown>[],
+  sdk: ReturnType<typeof getSDKClient>
+): Promise<Record<string, unknown>[]> {
+  if (!sdk) return metafields;
+
+  const processedMetafields = [];
+
+  for (const mf of metafields) {
+    const metafield = { ...mf };
+    const fieldType = metafield.type as string;
+    const fieldKey = metafield.key as string;
+
+    // Handle 'file' type metafields (single image)
+    if (fieldType === 'file' ||
+      fieldKey?.includes('image') ||
+      fieldKey?.includes('photo') ||
+      fieldKey?.includes('thumbnail') ||
+      fieldKey?.includes('featured')) {
+      const imageUrl = extractImageUrl(metafield.value);
+
+      if (imageUrl) {
+        // Check if it's an external URL that needs uploading
+        if (imageUrl.includes('images.unsplash.com')) {
+          spinner.update(`Uploading image for "${fieldKey}"...`);
+          const uploadedName = await uploadUnsplashImage(imageUrl, sdk);
+          if (uploadedName) {
+            metafield.value = uploadedName;
+          } else {
+            // Clear the value if upload failed
+            metafield.value = '';
+          }
+        } else if (imageUrl.includes('imgix.cosmicjs.com')) {
+          // Extract just the filename from imgix URL
+          metafield.value = imageUrl.replace('https://imgix.cosmicjs.com/', '');
+        } else if (imageUrl.includes('cdn.cosmicjs.com')) {
+          // Handle cdn URLs - they might have double URLs
+          // e.g., "https://cdn.cosmicjs.com/https://images.unsplash.com/..."
+          const match = imageUrl.match(/https:\/\/cdn\.cosmicjs\.com\/(.+)/);
+          if (match) {
+            const innerUrl = match[1];
+            if (innerUrl.startsWith('https://images.unsplash.com')) {
+              spinner.update(`Uploading image for "${fieldKey}"...`);
+              const uploadedName = await uploadUnsplashImage(innerUrl, sdk);
+              if (uploadedName) {
+                metafield.value = uploadedName;
+              } else {
+                metafield.value = '';
+              }
+            } else {
+              metafield.value = innerUrl;
+            }
+          }
+        }
+      }
+    }
+
+    // Handle 'files' type metafields (multiple images)
+    else if (fieldType === 'files' && Array.isArray(metafield.value)) {
+      const processedValues: string[] = [];
+
+      for (const item of metafield.value as unknown[]) {
+        const imageUrl = extractImageUrl(item);
+
+        if (imageUrl) {
+          if (imageUrl.includes('images.unsplash.com')) {
+            spinner.update(`Uploading image for "${fieldKey}"...`);
+            const uploadedName = await uploadUnsplashImage(imageUrl, sdk);
+            if (uploadedName) {
+              processedValues.push(uploadedName);
+            }
+          } else if (imageUrl.includes('imgix.cosmicjs.com')) {
+            processedValues.push(imageUrl.replace('https://imgix.cosmicjs.com/', ''));
+          } else if (typeof item === 'string') {
+            processedValues.push(item);
+          }
+        } else if (typeof item === 'string') {
+          processedValues.push(item);
+        }
+      }
+
+      metafield.value = processedValues;
+    }
+
+    processedMetafields.push(metafield);
+  }
+
+  return processedMetafields;
 }
 
 /**
@@ -926,13 +1132,26 @@ interface ChatMessage {
   content: string;
 }
 
+/**
+ * Context for AI chat - object types, links, etc.
+ */
+interface ChatContext {
+  objectTypes?: string[];        // Object type slugs to include as context
+  objectsLimit?: number;         // Max objects per type (default: 3)
+  objectsDepth?: number;         // Object depth (default: 1)
+  links?: string[];              // External URLs to crawl for context
+}
+
 interface ChatOptions {
   model?: string;
   initialPrompt?: string;  // Pre-loaded prompt to start the conversation
   buildMode?: boolean;     // Whether we're in app building mode (uses higher token limit)
+  contentMode?: boolean;   // Whether we're in content creation/update mode
   repoMode?: boolean;      // Whether we're in repository update mode
   repoName?: string;       // Specific repository name to update
   repoBranch?: string;     // Branch to use in repo mode
+  askMode?: boolean;       // Whether to run in ask/read-only mode (default: true)
+  context?: ChatContext;   // Structured context (object types, links, etc.)
 }
 
 // Conversation history
@@ -941,8 +1160,23 @@ let conversationHistory: ChatMessage[] = [];
 // Build mode flag - when true, uses higher max_tokens for app generation
 let isBuildMode = false;
 
+// Content mode flag - when true, focused on content creation/updates
+let isContentMode = false;
+
 // Repo mode flag - when true, uses streamingRepositoryUpdate instead of regular chat
 let isRepoMode = false;
+
+// Ask mode flag - when true (default), AI only answers questions without actions
+let isAskMode = true;
+
+// Current chat context - object types, links, etc.
+let chatContext: ChatContext = {};
+
+// Fetched context data - actual content from URLs and objects
+let fetchedContextData: {
+  objects: Record<string, unknown>[];
+  linkContents: { url: string; content: string }[];
+} = { objects: [], linkContents: [] };
 
 // Current repository info for repo mode
 let currentRepo: {
@@ -954,6 +1188,147 @@ let currentRepo: {
 
 // Last successful deployment URL (for "open" command)
 let lastDeploymentUrl: string | null = null;
+
+/**
+ * Fetch text content from a URL
+ */
+async function fetchUrlContent(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; CosmicCLI/1.0)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const html = await response.text();
+
+    // Extract text content from HTML (simple extraction)
+    // Remove script and style tags
+    let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+    // Remove HTML tags
+    text = text.replace(/<[^>]+>/g, ' ');
+    // Decode HTML entities
+    text = text.replace(/&nbsp;/g, ' ');
+    text = text.replace(/&amp;/g, '&');
+    text = text.replace(/&lt;/g, '<');
+    text = text.replace(/&gt;/g, '>');
+    text = text.replace(/&quot;/g, '"');
+    // Clean up whitespace
+    text = text.replace(/\s+/g, ' ').trim();
+
+    // Truncate if too long (max ~8000 chars per URL)
+    if (text.length > 8000) {
+      text = text.substring(0, 8000) + '...';
+    }
+
+    return text;
+  } catch (error) {
+    console.error(chalk.dim(`  Failed to fetch ${url}: ${(error as Error).message}`));
+    return null;
+  }
+}
+
+/**
+ * Fetch context data (objects and URL contents)
+ */
+async function fetchContextData(bucketSlug: string): Promise<void> {
+  fetchedContextData = { objects: [], linkContents: [] };
+
+  const isDebug = process.env.COSMIC_DEBUG === '1' || process.env.COSMIC_DEBUG === '2';
+
+  const hasContext = (chatContext.objectTypes && chatContext.objectTypes.length > 0) ||
+    (chatContext.links && chatContext.links.length > 0);
+
+  if (!hasContext) {
+    if (isDebug) {
+      console.log(chalk.dim('[DEBUG] fetchContextData: No context to fetch'));
+    }
+    return;
+  }
+
+  spinner.start('Fetching context data...');
+
+  try {
+    // Fetch objects for specified types
+    if (chatContext.objectTypes && chatContext.objectTypes.length > 0) {
+      const limit = chatContext.objectsLimit || 5;
+
+      for (const typeSlug of chatContext.objectTypes) {
+        try {
+          if (isDebug) {
+            console.log(chalk.dim(`\n[DEBUG] Fetching objects for type: ${typeSlug}, bucket: ${bucketSlug}`));
+          }
+
+          const { objects } = await api.listObjects(bucketSlug, {
+            type: typeSlug,
+            status: 'any',
+            limit,
+          });
+
+          if (isDebug) {
+            console.log(chalk.dim(`[DEBUG] Got ${objects.length} objects for type: ${typeSlug}`));
+          }
+
+          fetchedContextData.objects.push(...objects.map(obj => ({
+            id: obj.id,
+            title: obj.title,
+            slug: obj.slug,
+            type: obj.type,
+            status: obj.status,
+            content: obj.content,
+            metadata: obj.metadata,
+          })));
+        } catch (err) {
+          // Type might not exist
+          if (isDebug) {
+            console.log(chalk.dim(`[DEBUG] Failed to fetch type ${typeSlug}: ${(err as Error).message}`));
+          }
+        }
+      }
+    }
+
+    // Fetch content from URLs
+    if (chatContext.links && chatContext.links.length > 0) {
+      for (const url of chatContext.links) {
+        if (isDebug) {
+          console.log(chalk.dim(`\n[DEBUG] Fetching URL: ${url}`));
+        }
+
+        const content = await fetchUrlContent(url);
+
+        if (content) {
+          if (isDebug) {
+            console.log(chalk.dim(`[DEBUG] Got ${content.length} chars from URL`));
+            console.log(chalk.dim(`[DEBUG] Content preview: ${content.substring(0, 200)}...`));
+          }
+          fetchedContextData.linkContents.push({ url, content });
+        } else if (isDebug) {
+          console.log(chalk.dim('[DEBUG] No content returned from URL'));
+        }
+      }
+    }
+
+    const objectCount = fetchedContextData.objects.length;
+    const linkCount = fetchedContextData.linkContents.length;
+
+    if (objectCount > 0 || linkCount > 0) {
+      spinner.succeed(`Loaded ${objectCount} objects and ${linkCount} URLs`);
+    } else {
+      spinner.stop();
+    }
+  } catch (error) {
+    spinner.fail('Failed to fetch context data');
+    if (isDebug) {
+      console.log(chalk.dim(`[DEBUG] fetchContextData error: ${(error as Error).message}`));
+    }
+  }
+}
 
 /**
  * Try to fetch and store bucket keys from the Dashboard API
@@ -994,6 +1369,26 @@ export async function startChat(options: ChatOptions): Promise<void> {
   isRepoMode = options.repoMode || false;
   currentRepo = null;
 
+  // Set content mode flag if provided
+  isContentMode = options.contentMode || false;
+
+  // Set ask mode flag - defaults to true (read-only mode)
+  // Agent mode is enabled with --agent flag or when using --build/--content
+  // For repo mode: defaults to agent mode unless --ask flag is explicitly provided
+  if (options.askMode === true) {
+    // Explicit ask mode (e.g., cosmic update --ask)
+    isAskMode = true;
+  } else if (isBuildMode || isContentMode || isRepoMode) {
+    // Build, content, and repo modes default to agent mode
+    isAskMode = false;
+  } else {
+    // Default chat mode is ask mode (read-only)
+    isAskMode = options.askMode !== false;
+  }
+
+  // Set chat context from options
+  chatContext = options.context || {};
+
   // Add global error handlers for debugging
   process.on('uncaughtException', (err) => {
     console.error(chalk.red(`\n[CRASH] Uncaught exception: ${err.message}`));
@@ -1032,6 +1427,9 @@ export async function startChat(options: ChatOptions): Promise<void> {
   }
 
   const model = options.model || getDefaultModel();
+
+  // Fetch context data (objects and URLs) if specified
+  await fetchContextData(bucketSlug);
 
   // If repo mode, select a repository first
   if (isRepoMode) {
@@ -1272,8 +1670,28 @@ export async function startChat(options: ChatOptions): Promise<void> {
         }
 
         if (input.toLowerCase() === 'context') {
-          console.log(chalk.dim(`Context: ${formatContext()}`));
-          console.log(chalk.dim(`Model: ${model}`));
+          console.log();
+          console.log(chalk.bold('Current Configuration:'));
+          console.log(chalk.dim(`  Bucket: ${formatContext()}`));
+          console.log(chalk.dim(`  Model: ${model}`));
+          console.log(chalk.dim(`  Mode: ${isAskMode ? 'Ask (read-only)' : isContentMode ? 'Content' : isRepoMode ? 'Repository' : isBuildMode ? 'Build' : 'Agent'}`));
+
+          // Show chat context details
+          if (chatContext.objectTypes?.length || chatContext.links?.length) {
+            console.log();
+            console.log(chalk.bold('AI Context:'));
+            if (chatContext.objectTypes && chatContext.objectTypes.length > 0) {
+              console.log(chalk.dim(`  Object Types: ${chatContext.objectTypes.join(', ')}`));
+            }
+            if (chatContext.links && chatContext.links.length > 0) {
+              console.log(chalk.dim(`  External Links: ${chatContext.links.join(', ')}`));
+            }
+          } else {
+            console.log();
+            console.log(chalk.dim('  No additional context configured.'));
+            console.log(chalk.dim('  Use --content, --types, or --links flags when starting chat.'));
+          }
+          console.log();
           continue;
         }
 
@@ -1420,10 +1838,175 @@ Generate complete, realistic content that matches what the code expects.` }],
 }
 
 /**
- * Get the system prompt for the chat
+ * Get the system prompt for ask mode (read-only, no actions)
  */
-function getSystemPrompt(bucketSlug: string): string {
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+function getAskModeSystemPrompt(bucketSlug: string): string {
+  const today = new Date().toISOString().split('T')[0];
+
+  let contextSection = '';
+
+  // Add object types context info
+  if (chatContext.objectTypes && chatContext.objectTypes.length > 0) {
+    contextSection += `\n\n**Object Types in Context:** ${chatContext.objectTypes.join(', ')}`;
+  }
+
+  // Add links context info  
+  if (chatContext.links && chatContext.links.length > 0) {
+    contextSection += `\n\n**External Links in Context:** ${chatContext.links.join(', ')}`;
+  }
+
+  // Add fetched context data (actual content)
+  contextSection += buildFetchedContextSection();
+
+  return `You are a helpful AI assistant for Cosmic CMS, answering questions about the bucket "${bucketSlug}".
+
+Current date: ${today}
+
+**MODE: Ask Mode (Read-Only)**
+You are in read-only "ask" mode. You can answer questions, explain concepts, and provide guidance about Cosmic CMS, but you CANNOT execute any actions that modify content.
+
+In this mode:
+- Answer questions about Cosmic CMS, content modeling, APIs, and best practices
+- Explain how to use features, structure content, or integrate with applications
+- Provide code examples, documentation references, and helpful guidance
+- Discuss the user's content strategy, architecture decisions, or implementation approaches
+
+If the user wants to create, update, or delete content, explain that they need to use "agent mode" by restarting with:
+  cosmic chat --agent
+
+Or use the shortcut commands:
+  cosmic content  - Create and manage content
+  cosmic build    - Build and deploy a new app
+  cosmic update   - Update an existing repository${contextSection}
+
+Be helpful, concise, and friendly. Focus on providing valuable information rather than actions.`;
+}
+
+/**
+ * Build fetched context section for system prompts
+ */
+function buildFetchedContextSection(): string {
+  let section = '';
+
+  // Add fetched objects
+  if (fetchedContextData.objects.length > 0) {
+    section += '\n\n**EXISTING CONTENT IN THIS BUCKET:**\n';
+    section += 'Use this as reference for the content structure and style:\n';
+    section += '```json\n';
+    section += JSON.stringify(fetchedContextData.objects, null, 2);
+    section += '\n```';
+  }
+
+  // Add fetched URL contents
+  if (fetchedContextData.linkContents.length > 0) {
+    section += '\n\n**REFERENCE CONTENT FROM PROVIDED URLs - USE THIS CONTENT:**\n';
+    section += 'The user wants you to use this content as reference or to recreate it in their bucket.\n';
+    section += 'When asked to "add this" or "create this", use the content below:\n';
+    for (const { url, content } of fetchedContextData.linkContents) {
+      section += `\n<url_content source="${url}">\n`;
+      section += content;
+      section += '\n</url_content>\n';
+    }
+  }
+
+  // Debug logging
+  if (process.env.COSMIC_DEBUG === '1' || process.env.COSMIC_DEBUG === '2') {
+    console.log(chalk.dim(`[DEBUG] buildFetchedContextSection: ${fetchedContextData.objects.length} objects, ${fetchedContextData.linkContents.length} URLs`));
+    if (fetchedContextData.linkContents.length > 0) {
+      console.log(chalk.dim(`[DEBUG] URL content length: ${fetchedContextData.linkContents[0]?.content?.length || 0} chars`));
+    }
+  }
+
+  return section;
+}
+
+/**
+ * Get the system prompt for content mode (content creation and updates)
+ */
+function getContentModeSystemPrompt(bucketSlug: string): string {
+  const today = new Date().toISOString().split('T')[0];
+
+  let contextSection = '';
+
+  // Add object types context info
+  if (chatContext.objectTypes && chatContext.objectTypes.length > 0) {
+    contextSection += `\n\n**Focus Object Types:** ${chatContext.objectTypes.join(', ')}
+When creating content, prioritize these object types.`;
+  }
+
+  // Add fetched context data (actual content)
+  contextSection += buildFetchedContextSection();
+
+  return `You are an AI content assistant for Cosmic CMS, helping users create and manage content in their bucket "${bucketSlug}".
+
+Current date: ${today}
+
+**MODE: Content Mode**
+You are in content creation mode. Your primary focus is helping users:
+- Create new content objects (blog posts, pages, products, etc.)
+- Generate high-quality text content with AI
+- Update existing content
+- Set up content models and object types
+- Manage content organization${contextSection}
+
+You can perform these actions by outputting JSON commands:
+
+**CONTENT OPERATIONS:**
+1. LIST objects: {"action": "list", "type": "<object-type-slug>", "limit": 10}
+2. READ object: {"action": "read", "id": "<object-id-or-slug>"}
+3. CREATE object: {"action": "create", "type": "<object-type-slug>", "title": "<title>", "metadata": {...}}
+4. UPDATE object: {"action": "update", "id": "<id>", "title": "<new title>", "metadata": {...}}
+5. DELETE object: {"action": "delete", "id": "<id>"}
+
+**OBJECT TYPES:**
+6. LIST object types: {"action": "list_object_types"}
+7. CREATE object type: {"action": "create_object_type", "title": "<title>", "slug": "<slug>", "singular": "<singular>", "emoji": "<emoji>", "metafields": [...]}
+
+**CREATE OBJECT - REQUIRED FIELDS:**
+- "type": The object type SLUG (e.g., "blog-posts", "authors") - REQUIRED
+- "title": The object title - REQUIRED
+
+**CREATE OBJECT - OPTIONAL FIELDS:**
+- "slug": Auto-generated from title if not provided
+- "metadata": Object with metafield key:value pairs matching the object type's metafields
+
+**METAFIELD TYPES:**
+- text: Single line text
+- textarea: Multi-line plain text
+- html-textarea: Rich text HTML editor
+- markdown: Markdown editor
+- number: Numeric value
+- date: Date picker
+- file: File/image upload
+- object: Reference to single object
+- objects: Reference to multiple objects
+- switch: Boolean toggle
+- select-dropdown: Dropdown select
+- repeater: Repeatable group of fields
+
+When a user asks to create or update content, output the JSON command on a single line starting with "ACTION:".
+
+Examples:
+- ACTION: {"action": "list", "type": "posts", "limit": 5}
+- ACTION: {"action": "create", "type": "blog-posts", "title": "My New Post", "metadata": {"content": "...", "excerpt": "..."}}
+
+**CREATING MULTIPLE ITEMS:**
+When asked to create multiple items, use create_batch first:
+ACTION: {"action": "create_batch", "count": <number>, "type": "<type-slug>", "items": ["Title 1", "Title 2", ...]}
+
+**INSTALL CONTENT MODEL:**
+For creating object types with demo content:
+ACTION: {"action": "install_content_model", "object_types": [...], "demo_objects": [...]}
+
+Be creative and helpful when generating content. Write high-quality, engaging text that matches the user's needs.
+For general questions or help, respond normally without any ACTION command.`;
+}
+
+/**
+ * Get the system prompt for agent mode (full actions)
+ */
+function getAgentModeSystemPrompt(bucketSlug: string): string {
+  const today = new Date().toISOString().split('T')[0];
 
   return `You are an AI assistant for Cosmic CMS, helping users manage content in their bucket "${bucketSlug}".
 
@@ -1649,6 +2232,19 @@ ACTION: {"action": "install_content_model", "object_types": [
 20. DEPLOY REPOSITORY: {"action": "deploy_repository", "repository_id": "<id>"}
 
 For general questions or help, respond normally without any ACTION command.`;
+}
+
+/**
+ * Get the system prompt for the chat (mode-aware)
+ */
+function getSystemPrompt(bucketSlug: string): string {
+  if (isAskMode) {
+    return getAskModeSystemPrompt(bucketSlug);
+  }
+  if (isContentMode) {
+    return getContentModeSystemPrompt(bucketSlug);
+  }
+  return getAgentModeSystemPrompt(bucketSlug);
 }
 
 /**
@@ -2811,7 +3407,7 @@ async function processMessage(
         }
 
         spinner.stop();
-        console.log(chalk.dim('  Generating app...'));
+        console.log(chalk.dim(isAskMode ? '  Thinking...' : '  Generating app...'));
         console.log();
 
         // Convert messages to Dashboard API format (content as array)
@@ -2836,6 +3432,10 @@ async function processMessage(
           maxTokens,
           viewMode: 'build-app',
           selectedObjectTypes: objectTypeSlugs, // Include bucket's object types for context
+          links: chatContext.links, // Pass links to backend for crawling
+          metadata: {
+            chat_mode: isAskMode ? 'ask' : 'agent', // Ask mode = educational answers only, no code generation
+          },
           onChunk: (chunk) => {
             fullText += chunk;
 
@@ -2967,6 +3567,7 @@ async function processMessage(
           branch: currentRepo.branch,
           model,
           maxTokens: 32000,
+          chatMode: isAskMode ? 'ask' : 'agent',  // Pass chat mode to backend
           onChunk: (chunk) => {
             // Skip empty chunks
             if (!chunk) return;
@@ -3206,20 +3807,44 @@ async function processMessage(
           console.log(); // New line before streaming output
         }
 
+        // Build context configuration for the backend
+        const contextConfig = chatContext.objectTypes && chatContext.objectTypes.length > 0 ? {
+          objects: {
+            enabled: true,
+            object_types: chatContext.objectTypes,
+            include_models: true,
+            limit: chatContext.objectsLimit || 10,
+            props: ['id', 'title', 'slug', 'metadata', 'content'],
+          },
+        } : undefined;
+
         const result = await api.streamingChat({
           messages: dashboardMessages,
           bucketSlug,
           model,
           maxTokens,
-          viewMode: 'content-model', // Use content-model view mode for regular chat
+          viewMode: 'content-model',
+          selectedObjectTypes: chatContext.objectTypes || [],
+          links: chatContext.links, // Pass links to backend for crawling
+          contextConfig,
+          metadata: {
+            chat_mode: isAskMode ? 'ask' : isContentMode ? 'content' : 'agent',
+          },
           onChunk: (chunk) => {
             fullText += chunk;
 
             // Detect content model output (METADATA markers or ACTION:)
             if (!isContentModelMode) {
-              if (fullText.includes('<!-- METADATA:') || fullText.includes('ACTION:')) {
+              if (containsMetadataMarker(fullText) || fullText.includes('ACTION:')) {
                 isContentModelMode = true;
-                // Don't stream content model JSON - just let it accumulate
+
+                // Print any remaining clean content before the marker
+                const cleanText = cleanResponseForDisplay(fullText);
+                const newContent = cleanText.slice(lastPrintedLength);
+                if (newContent) {
+                  process.stdout.write(newContent);
+                  lastPrintedLength = cleanText.length;
+                }
                 return;
               }
             }
@@ -3230,10 +3855,12 @@ async function processMessage(
             }
 
             // Stream the text response in real-time for non-content-model responses
-            const newContent = fullText.slice(lastPrintedLength);
+            // Clean the text to remove any METADATA artifacts
+            const cleanText = cleanResponseForDisplay(fullText);
+            const newContent = cleanText.slice(lastPrintedLength);
             if (newContent) {
               process.stdout.write(newContent);
-              lastPrintedLength = fullText.length;
+              lastPrintedLength = cleanText.length;
             }
           },
         });
@@ -3275,8 +3902,12 @@ async function processMessage(
           }
         } else if (!isContentModelMode && !alreadyStreamedText && fullText.trim()) {
           // If we didn't stream and it's not content model, show the response now
-          console.log();
-          console.log(formatResponse(fullText.trim()));
+          // Clean METADATA markers from the response
+          const cleanText = cleanResponseForDisplay(fullText);
+          if (cleanText.trim()) {
+            console.log();
+            console.log(formatResponse(cleanText.trim()));
+          }
         }
       }
     } catch (apiError) {
@@ -3407,6 +4038,9 @@ async function processMessage(
         // No ACTION: found, display all text
         displayText = response.text;
       }
+
+      // Clean METADATA markers from display text
+      displayText = cleanResponseForDisplay(displayText);
 
       // Check for app build completion (FRAMEWORK and APP_NAME markers)
       const appMetadata = extractAppMetadata(response.text);
@@ -3817,11 +4451,20 @@ function printWelcomeScreen(model: string): void {
   let modeText = '';
   let modeColor = chalk.cyan;
   if (isRepoMode && currentRepo) {
-    modeText = 'Repository Mode';
-    modeColor = chalk.magenta;
+    modeText = isAskMode ? 'Repository Mode (Ask)' : 'Repository Mode';
+    modeColor = isAskMode ? chalk.blue : chalk.magenta;
   } else if (isBuildMode) {
-    modeText = 'Build Mode';
-    modeColor = chalk.green;
+    modeText = isAskMode ? 'Build Mode (Ask)' : 'Build Mode';
+    modeColor = isAskMode ? chalk.blue : chalk.green;
+  } else if (isContentMode) {
+    modeText = isAskMode ? 'Content Mode (Ask)' : 'Content Mode';
+    modeColor = isAskMode ? chalk.blue : chalk.yellow;
+  } else if (isAskMode) {
+    modeText = 'Ask Mode (read-only)';
+    modeColor = chalk.blue;
+  } else {
+    modeText = 'Agent Mode';
+    modeColor = chalk.yellow;
   }
 
   // Get user name
@@ -3833,6 +4476,15 @@ function printWelcomeScreen(model: string): void {
   const modelText = `Model: ${model}`;
   const repoText = isRepoMode && currentRepo ? `Repository: ${currentRepo.owner}/${currentRepo.name} (${currentRepo.branch})` : '';
 
+  // Build AI context text lines
+  const aiContextLines: string[] = [];
+  if (chatContext.objectTypes && chatContext.objectTypes.length > 0) {
+    aiContextLines.push(`Object Types: ${chatContext.objectTypes.join(', ')}`);
+  }
+  if (chatContext.links && chatContext.links.length > 0) {
+    aiContextLines.push(`Links: ${chatContext.links.join(', ')}`);
+  }
+
   // Find the widest content line
   const contentLines = [
     logoWidth,
@@ -3840,6 +4492,7 @@ function printWelcomeScreen(model: string): void {
     modelText.length,
     repoText.length,
     'Build and deploy a website:    cosmic chat --build'.length,
+    ...aiContextLines.map(l => l.length),
   ];
   const maxContentWidth = Math.max(...contentLines);
 
@@ -3904,9 +4557,9 @@ function printWelcomeScreen(model: string): void {
   // Tips
   console.log(leftLine(chalk.bold.white('Getting started')));
   console.log(emptyLine());
-  console.log(leftLine(chalk.dim('Build and deploy a website:    ') + chalk.white('cosmic chat --build')));
-  console.log(leftLine(chalk.dim('Update an existing repository: ') + chalk.white('cosmic chat --repo')));
-  console.log(leftLine(chalk.dim('Create a new project:          ') + chalk.white('cosmic projects create')));
+  console.log(leftLine(chalk.dim('Create and manage content:     ') + chalk.white('cosmic content')));
+  console.log(leftLine(chalk.dim('Build and deploy a website:    ') + chalk.white('cosmic build')));
+  console.log(leftLine(chalk.dim('Update an existing repository: ') + chalk.white('cosmic update')));
   console.log(emptyLine());
 
   console.log(hrMid());
@@ -3917,6 +4570,15 @@ function printWelcomeScreen(model: string): void {
 
   if (repoText) {
     console.log(leftLine(chalk.dim(repoText)));
+  }
+
+  // Show AI context if present
+  if (aiContextLines.length > 0) {
+    console.log(hrMid());
+    console.log(leftLine(chalk.bold.white('AI Context')));
+    for (const line of aiContextLines) {
+      console.log(leftLine(chalk.dim(line)));
+    }
   }
 
   console.log(hrBot());
@@ -3939,22 +4601,57 @@ function printHelp(): void {
   console.log(chalk.bold('Chat Commands:'));
   console.log(chalk.dim('  exit, quit') + '    - Exit the chat');
   console.log(chalk.dim('  clear') + '         - Clear conversation history');
-  console.log(chalk.dim('  context') + '       - Show current context');
+  console.log(chalk.dim('  context') + '       - Show/manage current context');
   console.log(chalk.dim('  open') + '          - Open last deployment in browser');
   console.log(chalk.dim('  add content') + '   - Generate and add content to Cosmic CMS');
   console.log(chalk.dim('  help') + '          - Show this help');
   console.log();
 
-  if (isRepoMode) {
-    console.log(chalk.bold('Repository Update Mode:'));
-    console.log(chalk.dim('  You are in repository update mode. Describe the changes you want.'));
+  // Show current mode info
+  if (isAskMode) {
+    console.log(chalk.bold('Current Mode: ') + chalk.blue('Ask Mode (read-only)'));
+    console.log(chalk.dim('  The AI will answer questions but cannot execute actions.'));
+    console.log(chalk.dim('  To enable actions, restart with: ') + chalk.cyan('cosmic chat --agent'));
+    console.log();
+    console.log(chalk.bold('Example questions:'));
+    console.log(chalk.dim('  "What object types are available?"'));
+    console.log(chalk.dim('  "How do I structure a blog with categories?"'));
+    console.log(chalk.dim('  "Explain how metafields work"'));
+    console.log(chalk.dim('  "What is the best way to model products?"'));
+  } else if (isRepoMode) {
+    if (isAskMode) {
+      console.log(chalk.bold('Current Mode: ') + chalk.blue('Repository Mode (Ask)'));
+      console.log(chalk.dim('  You are in read-only mode. Ask questions about the codebase.'));
+      console.log(chalk.dim('  Use `cosmic update` without --ask to make changes.'));
+    } else {
+      console.log(chalk.bold('Current Mode: ') + chalk.magenta('Repository Mode'));
+      console.log(chalk.dim('  You are in repository update mode. Describe the changes you want.'));
+    }
     console.log();
     console.log(chalk.bold('Example prompts:'));
     console.log(chalk.dim('  "Add a dark mode toggle to the header"'));
     console.log(chalk.dim('  "Fix the broken image on the homepage"'));
     console.log(chalk.dim('  "Add a contact form component"'));
     console.log(chalk.dim('  "Update the footer with new social links"'));
+  } else if (isBuildMode) {
+    console.log(chalk.bold('Current Mode: ') + chalk.green('Build Mode'));
+    console.log(chalk.dim('  Build and deploy a complete app from scratch.'));
+  } else if (isContentMode) {
+    console.log(chalk.bold('Current Mode: ') + chalk.yellow('Content Mode'));
+    console.log(chalk.dim('  Create and manage content with AI assistance.'));
+    console.log();
+    console.log(chalk.bold('Example prompts:'));
+    console.log(chalk.dim('  "Create a blog post about AI trends"'));
+    console.log(chalk.dim('  "Add 5 product descriptions for my store"'));
+    console.log(chalk.dim('  "Generate an author profile for John Doe"'));
+    console.log(chalk.dim('  "Set up a blog content model with posts and categories"'));
+    console.log(chalk.dim('  "Update the homepage content"'));
+    console.log();
+    console.log(chalk.dim('  Actions require confirmation before executing.'));
   } else {
+    console.log(chalk.bold('Current Mode: ') + chalk.yellow('Agent Mode'));
+    console.log(chalk.dim('  The AI can create, update, and delete content.'));
+    console.log();
     console.log(chalk.bold('Example prompts:'));
     console.log(chalk.dim('  "List all authors"'));
     console.log(chalk.dim('  "Create a new post titled Hello World"'));
@@ -3963,15 +4660,25 @@ function printHelp(): void {
     console.log(chalk.dim('  "Write a blog post about AI and save it"'));
     console.log();
     console.log(chalk.dim('  Actions require confirmation before executing.'));
-    console.log();
-    console.log(chalk.bold('Build & Deploy:'));
-    console.log(chalk.dim('  To generate and deploy a complete app, exit and run:'));
-    console.log(chalk.cyan('  cosmic chat --build'));
-    console.log();
-    console.log(chalk.bold('Update Code:'));
-    console.log(chalk.dim('  To update an existing repository with AI, exit and run:'));
-    console.log(chalk.cyan('  cosmic chat --repo'));
   }
+
+  console.log();
+  console.log(chalk.bold('Mode Shortcuts:'));
+  console.log(chalk.dim('  cosmic chat') + '             - Ask mode (read-only questions)');
+  console.log(chalk.dim('  cosmic chat --content') + '   - Content mode (create/update content)');
+  console.log(chalk.dim('  cosmic chat --agent') + '     - Agent mode (full actions)');
+  console.log(chalk.dim('  cosmic chat --build') + '     - Build a new app');
+  console.log(chalk.dim('  cosmic chat --repo') + '      - Update existing code');
+  console.log();
+  console.log(chalk.bold('Shortcut Commands:'));
+  console.log(chalk.dim('  cosmic content') + '          - Same as cosmic chat --content');
+  console.log(chalk.dim('  cosmic build') + '            - Same as cosmic chat --build');
+  console.log(chalk.dim('  cosmic update') + '           - Same as cosmic chat --repo');
+  console.log();
+  console.log(chalk.bold('Context Options:'));
+  console.log(chalk.dim('  --ctx <text>') + '            - Add custom context');
+  console.log(chalk.dim('  -t, --types <slugs>') + '     - Include object types (comma-separated)');
+  console.log(chalk.dim('  -l, --links <urls>') + '      - Include external URLs (comma-separated)');
   console.log();
 }
 
