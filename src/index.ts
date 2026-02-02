@@ -230,7 +230,6 @@ program.action(async () => {
     console.log(`  ${chalk.cyan('cosmic projects')}   List and manage projects`);
     console.log(`  ${chalk.cyan('cosmic cd')}         Navigate to project/bucket`);
     console.log(`  ${chalk.cyan('cosmic ls')}         List objects in current bucket`);
-    console.log(`  ${chalk.cyan('cosmic get')}        Get an object by slug or ID`);
     console.log(`  ${chalk.cyan('cosmic media')}      Media file operations`);
     console.log(`  ${chalk.cyan('cosmic workflows')}  Workflow operations`);
     console.log(`  ${chalk.cyan('cosmic agents')}     AI agent operations`);
