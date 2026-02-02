@@ -42,7 +42,7 @@ import {
   stripPathsFromMessage,
 } from './mediaAttachment.js';
 import * as spinner from '../utils/spinner.js';
-import { select } from '../utils/prompts.js';
+import { select, multiselect, text } from '../utils/prompts.js';
 
 // Fallback images when Unsplash fails
 const FALLBACK_IMAGES = [
@@ -87,6 +87,119 @@ function addIdsToMetafields(metafields: Record<string, unknown>[]): Record<strin
 
     return fieldWithId;
   });
+}
+
+// Build preferences options for app generation
+const BUILD_TECH_OPTIONS = [
+  { name: 'nextjs', message: 'Next.js (React, App Router)' },
+  { name: 'react', message: 'React (Vite)' },
+  { name: 'vue', message: 'Vue.js (Nuxt)' },
+  { name: 'astro', message: 'Astro' },
+  { name: 'remix', message: 'Remix' },
+] as const;
+
+const BUILD_DESIGN_OPTIONS = [
+  { name: 'modern', message: 'Modern & Clean' },
+  { name: 'minimal', message: 'Minimal & Simple' },
+  { name: 'bold', message: 'Bold & Colorful' },
+  { name: 'elegant', message: 'Elegant & Professional' },
+  { name: 'playful', message: 'Playful & Fun' },
+] as const;
+
+const BUILD_FEATURE_OPTIONS = [
+  { name: 'responsive', message: 'Mobile Responsive' },
+  { name: 'darkmode', message: 'Dark Mode Support' },
+  { name: 'animations', message: 'Smooth Animations' },
+  { name: 'seo', message: 'SEO Optimized' },
+  { name: 'accessibility', message: 'Accessibility (a11y)' },
+  { name: 'typescript', message: 'TypeScript' },
+] as const;
+
+interface BuildPreferences {
+  description: string;
+  technology: string;
+  design: string;
+  features: string[];
+}
+
+/**
+ * Gather app build preferences from the user
+ * Returns a rich prompt that includes technology, design, and feature preferences
+ */
+async function gatherBuildPreferences(initialDescription?: string): Promise<BuildPreferences> {
+  console.log();
+  console.log(chalk.cyan('  Let\'s customize your app:'));
+  console.log();
+
+  // Get app description
+  const description = initialDescription || await text({
+    message: 'Describe your app:',
+    required: true,
+  });
+
+  // Select technology
+  const technology = await select({
+    message: 'Framework:',
+    choices: BUILD_TECH_OPTIONS.map(o => ({ name: o.name, message: o.message })),
+  });
+
+  // Select design style
+  const design = await select({
+    message: 'Design style:',
+    choices: BUILD_DESIGN_OPTIONS.map(o => ({ name: o.name, message: o.message })),
+  });
+
+  // Select features (multi-select)
+  const features = await multiselect({
+    message: 'Features (space to select, enter to confirm):',
+    choices: BUILD_FEATURE_OPTIONS.map(o => ({ name: o.name, message: o.message })),
+    initial: [0, 3], // Default: responsive and SEO
+  });
+
+  return { description, technology, design, features };
+}
+
+/**
+ * Build a rich prompt from build preferences
+ */
+function buildPromptFromPreferences(prefs: BuildPreferences): string {
+  const techMap: Record<string, string> = {
+    nextjs: 'Next.js with App Router',
+    react: 'React with Vite',
+    vue: 'Vue.js with Nuxt',
+    astro: 'Astro',
+    remix: 'Remix',
+  };
+
+  const designMap: Record<string, string> = {
+    modern: 'modern and clean',
+    minimal: 'minimal and simple',
+    bold: 'bold and colorful',
+    elegant: 'elegant and professional',
+    playful: 'playful and fun',
+  };
+
+  const featureMap: Record<string, string> = {
+    responsive: 'fully mobile responsive',
+    darkmode: 'dark mode support',
+    animations: 'smooth animations and transitions',
+    seo: 'SEO optimized with proper meta tags',
+    accessibility: 'accessible (WCAG compliant)',
+    typescript: 'TypeScript for type safety',
+  };
+
+  const tech = techMap[prefs.technology] || 'Next.js';
+  const design = designMap[prefs.design] || 'modern';
+  const featureList = prefs.features.map(f => featureMap[f] || f).join(', ');
+
+  return `Build ${prefs.description}
+
+Technical Requirements:
+- Framework: ${tech}
+- Design: ${design} aesthetic with Tailwind CSS
+- Features: ${featureList || 'responsive design'}
+
+Please create a complete, production-ready application.`;
 }
 
 /**
@@ -360,6 +473,22 @@ async function installContentToCosmic(
       }
     }
 
+    // Build a map of object type metafields for enriching demo objects
+    // This is similar to what the Dashboard's CombinedModelDemoButton does
+    const objectTypeMetafieldsMap: Map<string, Map<string, Record<string, unknown>>> = new Map();
+    for (const type of objectTypes) {
+      const typeData = type as { slug?: string; metafields?: Record<string, unknown>[] };
+      if (typeData.slug && Array.isArray(typeData.metafields)) {
+        const metafieldMap = new Map<string, Record<string, unknown>>();
+        for (const mf of typeData.metafields) {
+          if (mf.key) {
+            metafieldMap.set(mf.key as string, mf);
+          }
+        }
+        objectTypeMetafieldsMap.set(typeData.slug, metafieldMap);
+      }
+    }
+
     // Add demo objects using DAPI (like the dashboard does)
     let objectsAdded = 0;
     let objectsSkipped = 0;
@@ -395,6 +524,7 @@ async function installContentToCosmic(
             type: string;
             value?: unknown;
             required?: boolean;
+            options?: Array<{ key?: string; value: string }>;
           }>;
         } = {
           title: objTyped.title || 'Untitled',
@@ -427,16 +557,44 @@ async function installContentToCosmic(
           // Process metafield images (upload Unsplash/external images to Cosmic)
           const processedMetafields = await processMetafieldImages(metafieldsWithIds, sdk);
 
-          // Format for API
+          // Get the object type metafields map for this object's type
+          const typeMetafields = objectTypeMetafieldsMap.get(objTyped.type || '');
+
+          // Format for API and copy options from object type (like the Dashboard does)
           insertPayload.metafields = processedMetafields.map(mf => {
             const metafield = mf as Record<string, unknown>;
-            return {
+            const key = metafield.key as string;
+            const type = metafield.type as string;
+
+            // Build the base metafield object
+            const formattedMetafield: Record<string, unknown> = {
               id: metafield.id as string,
-              title: metafield.title as string || (metafield.key as string).charAt(0).toUpperCase() + (metafield.key as string).slice(1).replace(/_/g, ' '),
-              key: metafield.key as string,
-              type: metafield.type as string,
+              title: metafield.title as string || key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+              key,
+              type,
               value: metafield.value,
               required: metafield.required as boolean,
+            };
+
+            // For select-dropdown and check-boxes, copy options from the object type metafield
+            // This is what the Dashboard's CombinedModelDemoButton does (lines 1052-1059)
+            if ((type === 'select-dropdown' || type === 'check-boxes' || type === 'radio-buttons') && typeMetafields) {
+              const objectTypeMetafield = typeMetafields.get(key);
+              if (objectTypeMetafield?.options) {
+                formattedMetafield.options = objectTypeMetafield.options;
+              } else if (metafield.options) {
+                // Fall back to options from the AI response if present
+                formattedMetafield.options = metafield.options;
+              }
+            }
+
+            return formattedMetafield as {
+              id?: string;
+              title?: string;
+              key: string;
+              type: string;
+              value?: unknown;
+              required?: boolean;
             };
           });
         } else if (objTyped.metadata && typeof objTyped.metadata === 'object') {
@@ -1789,6 +1947,12 @@ Generate complete, realistic content that matches what the code expects.` }],
                 console.log(chalk.green('  Switching to build mode...'));
                 console.log();
                 console.log(chalk.cyan('  Describe the app you\'d like to build:'));
+                console.log();
+                console.log(chalk.dim('  Tip: Include details like:'));
+                console.log(chalk.dim('    • Framework: Next.js, React, Vue, Astro'));
+                console.log(chalk.dim('    • Design: modern, minimal, bold, elegant'));
+                console.log(chalk.dim('    • Features: responsive, dark mode, animations'));
+                console.log();
               } else if (result.nextAction === 'exit') {
                 console.log(chalk.dim('  Goodbye!'));
                 rl.close();
@@ -3235,6 +3399,7 @@ async function executeAction(actionJson: string): Promise<string> {
           }
 
           // Step 3: Resolve object references (update objects with proper IDs)
+          // This follows the same pattern as dashboard/autonomousAgent.service.js
           if (successfulObjects.length > 0) {
             const objectsWithRefs = successfulObjects.filter(({ original }) => {
               const typeSlug = original.type as string;
@@ -3247,6 +3412,43 @@ async function executeAction(actionJson: string): Promise<string> {
             if (objectsWithRefs.length > 0) {
               console.log();
               console.log(chalk.cyan('  Resolving references...'));
+
+              // Cache for existing objects fetched by slug to avoid repeated fetches
+              const slugCache: Map<string, string | null> = new Map();
+
+              // Helper function to get an object ID from a slug
+              // First checks newly created objects, then fetches from API if not found
+              const getObjectIdFromSlug = async (slug: string): Promise<string | null> => {
+                // If already in our map of newly created objects, return that ID
+                if (createdObjects.has(slug)) {
+                  return createdObjects.get(slug) || null;
+                }
+
+                // If we've already looked up this slug, return from cache
+                if (slugCache.has(slug)) {
+                  return slugCache.get(slug) || null;
+                }
+
+                // Try to fetch the object by slug from the bucket
+                try {
+                  const result = await sdkClient.objects.find({
+                    type: { $exists: true },
+                    slug,
+                  }).limit(1);
+
+                  if (result?.objects && result.objects.length > 0) {
+                    const objectId = result.objects[0].id as string;
+                    slugCache.set(slug, objectId);
+                    return objectId;
+                  } else {
+                    slugCache.set(slug, null);
+                    return null;
+                  }
+                } catch (error) {
+                  slugCache.set(slug, null);
+                  return null;
+                }
+              };
 
               let refsUpdated = 0;
               for (const { original, created } of objectsWithRefs) {
@@ -3274,18 +3476,42 @@ async function executeAction(actionJson: string): Promise<string> {
 
                   if (metafield.type === 'object' && typeof value === 'string') {
                     // Single object reference - convert slug to ID
-                    const refId = createdObjects.get(value);
+                    // Check if already an ID (24-char hex string)
+                    if (/^[a-f0-9]{24}$/i.test(value)) {
+                      continue; // Already an ID, skip
+                    }
+                    const refId = await getObjectIdFromSlug(value);
                     if (refId) {
                       updates[key] = refId;
                       hasUpdates = true;
                     }
                   } else if (metafield.type === 'objects' && Array.isArray(value)) {
                     // Multiple object references - convert slugs to IDs
-                    const refIds = value
-                      .map((slug: string) => createdObjects.get(slug))
-                      .filter(Boolean);
-                    if (refIds.length > 0) {
-                      updates[key] = refIds;
+                    const updatedValues: string[] = [];
+                    let arrayUpdated = false;
+
+                    for (const val of value) {
+                      if (typeof val === 'string') {
+                        // Check if already an ID (24-char hex string)
+                        if (/^[a-f0-9]{24}$/i.test(val)) {
+                          updatedValues.push(val); // Keep existing ID
+                        } else {
+                          // Looks like a slug, try to resolve it
+                          const objectId = await getObjectIdFromSlug(val);
+                          if (objectId) {
+                            updatedValues.push(objectId);
+                            arrayUpdated = true;
+                          } else {
+                            updatedValues.push(val); // Keep original if not found
+                          }
+                        }
+                      } else {
+                        updatedValues.push(val); // Keep original value
+                      }
+                    }
+
+                    if (arrayUpdated) {
+                      updates[key] = updatedValues;
                       hasUpdates = true;
                     }
                   }
@@ -3465,6 +3691,9 @@ async function processMessage(
         let lastPrintedLength = 0;
         let hasShownOverview = false;
         let overviewPrinted = 0;
+        // Track whether we've determined this is structured (marker-based) output
+        // We buffer content until we can confirm whether markers exist
+        let structuredOutputConfirmed: boolean | null = null; // null = unknown, true = has markers, false = plain text
 
         // Use chatContext.objectTypes when specified, otherwise all bucket object types
         const selectedTypes = (chatContext.objectTypes && chatContext.objectTypes.length > 0)
@@ -3522,11 +3751,39 @@ async function processMessage(
               }
             } else if (!isGeneratingFiles) {
               // Check if this is structured app output (has markers) or conversational response
-              const hasAppMarkers = fullText.includes('<!-- APP_OVERVIEW_START -->') ||
-                fullText.includes('<!-- METADATA:') ||
-                fullText.includes('<!-- README_START -->');
+              // We need to buffer until we can determine if markers exist to avoid printing them
 
-              if (hasAppMarkers) {
+              // Check for complete markers
+              const hasCompleteAppMarker = fullText.includes('<!-- APP_OVERVIEW_START -->');
+              const hasCompleteMetadataMarker = fullText.includes('<!-- METADATA:');
+              const hasCompleteReadmeMarker = fullText.includes('<!-- README_START -->');
+              const hasAppMarkers = hasCompleteAppMarker || hasCompleteMetadataMarker || hasCompleteReadmeMarker;
+
+              // Check for partial HTML comment that might become a marker
+              // This prevents printing partial markers like "<!-- APP_OVERVIEW_START"
+              const hasPartialMarker = fullText.includes('<!--') && !hasAppMarkers;
+              const endsWithPartialComment = /<!--[^>]*$/.test(fullText);
+
+              // Determine if this is structured output
+              if (structuredOutputConfirmed === null) {
+                if (hasAppMarkers) {
+                  // Confirmed structured output
+                  structuredOutputConfirmed = true;
+                } else if (hasPartialMarker && fullText.length < 500) {
+                  // Has partial marker, wait for more content to determine
+                  // But don't wait forever - after 500 chars it's likely not a marker
+                  lastPrintedLength = fullText.length;
+                  return;
+                } else if (!fullText.includes('<!--') && fullText.length > 100) {
+                  // No HTML comment pattern and enough content - it's plain text
+                  structuredOutputConfirmed = false;
+                } else if (fullText.length > 500) {
+                  // After 500 chars with only partial markers, treat as plain text
+                  structuredOutputConfirmed = false;
+                }
+              }
+
+              if (structuredOutputConfirmed === true || hasAppMarkers) {
                 // Structured app output - only show content between APP_OVERVIEW_START and APP_OVERVIEW_END
                 const overviewStart = fullText.indexOf('<!-- APP_OVERVIEW_START -->');
                 const overviewEnd = fullText.indexOf('<!-- APP_OVERVIEW_END -->');
@@ -3540,12 +3797,13 @@ async function processMessage(
                   // Show new content since last print
                   if (overviewContent.length > overviewPrinted) {
                     const newContent = overviewContent.slice(overviewPrinted);
-                    // Filter out PROGRESS markers and json code blocks following them
+                    // Filter out PROGRESS markers, METADATA markers, and other HTML comments
                     const filteredContent = newContent
                       .replace(/<!-- PROGRESS:[^>]+-->\s*```json\s*\/\/[^`]*```/g, '')
                       .replace(/<!-- PROGRESS:[^>]+-->/g, '')
                       .replace(/<!-- METADATA:[^>]+-->/g, '')
-                      .replace(/<!-- FRAMEWORK:[^>]+-->/g, '');
+                      .replace(/<!-- FRAMEWORK:[^>]+-->/g, '')
+                      .replace(/<!--[^>]*-->/g, ''); // Strip any remaining HTML comments
                     if (filteredContent.trim()) {
                       process.stdout.write(filteredContent);
                     }
@@ -3558,17 +3816,22 @@ async function processMessage(
                   }
                   lastPrintedLength = fullText.length;
                 } else if (overviewStart === -1) {
-                  // Has markers but no overview yet - wait for it
+                  // Has markers but no overview yet - wait for it (buffer)
                   lastPrintedLength = fullText.length;
                 }
-              } else {
-                // No app markers - stream normally (conversational response like questions)
+              } else if (structuredOutputConfirmed === false) {
+                // Plain text - stream normally but filter out any stray HTML comments
                 const newContent = fullText.slice(lastPrintedLength);
-                if (newContent) {
-                  process.stdout.write(newContent);
+                if (newContent && !endsWithPartialComment) {
+                  // Strip any HTML comments that might have leaked through
+                  const cleanContent = newContent.replace(/<!--[^>]*-->/g, '');
+                  if (cleanContent) {
+                    process.stdout.write(cleanContent);
+                  }
                   lastPrintedLength = fullText.length;
                 }
               }
+              // If structuredOutputConfirmed is null, we're still buffering - don't print yet
             }
           },
           onProgress: (progress) => {
@@ -3821,6 +4084,12 @@ async function processMessage(
             console.log(chalk.green('  Switching to build mode...'));
             console.log();
             console.log(chalk.cyan('  Describe the app you\'d like to build:'));
+            console.log();
+            console.log(chalk.dim('  Tip: Include details like:'));
+            console.log(chalk.dim('    • Framework: Next.js, React, Vue, Astro'));
+            console.log(chalk.dim('    • Design: modern, minimal, bold, elegant'));
+            console.log(chalk.dim('    • Features: responsive, dark mode, animations'));
+            console.log();
           } else if (result.nextAction === 'exit') {
             console.log(chalk.dim('  Goodbye!'));
             rl.close();
@@ -3958,6 +4227,12 @@ async function processMessage(
             console.log(chalk.green('  Switching to build mode...'));
             console.log();
             console.log(chalk.cyan('  Describe the app you\'d like to build:'));
+            console.log();
+            console.log(chalk.dim('  Tip: Include details like:'));
+            console.log(chalk.dim('    • Framework: Next.js, React, Vue, Astro'));
+            console.log(chalk.dim('    • Design: modern, minimal, bold, elegant'));
+            console.log(chalk.dim('    • Features: responsive, dark mode, animations'));
+            console.log();
           } else if (contentResult.nextAction === 'exit') {
             console.log(chalk.dim('  Goodbye!'));
             rl.close();
@@ -4168,8 +4443,13 @@ async function processMessage(
             const repoNameInput = await sharedAskLine!(chalk.yellow(`  Repository name [${defaultName}]: `));
             repoName = repoNameInput.trim() || defaultName;
 
-            // Convert to slug format (lowercase, hyphens)
-            const repoSlug = repoName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+            // Convert to slug format (lowercase, hyphens, no consecutive special chars)
+            const repoSlug = repoName
+              .toLowerCase()
+              .replace(/\s+/g, '-')           // Replace whitespace with hyphens
+              .replace(/[^a-z0-9-]/g, '-')    // Replace invalid chars with hyphens (not remove)
+              .replace(/-+/g, '-')            // Collapse consecutive hyphens
+              .replace(/^-|-$/g, '');         // Remove leading/trailing hyphens
 
             // Check repo availability
             console.log(chalk.dim(`  Checking availability...`));
@@ -4249,95 +4529,84 @@ async function processMessage(
                 repositoryUrl
               );
 
-              // If deployment failed and we have logs, offer to fix with AI
-              if (!deployResult.success && deployResult.logs && deployResult.logs.length > 0 && repositoryUrl) {
-                // Extract repo owner and name from URL (e.g., https://github.com/cosmic-community/my-app)
-                const urlParts = repositoryUrl.replace('https://github.com/', '').split('/');
-                const repoOwner = urlParts[0] || 'cosmic-community';
-                const repoNameFromUrl = urlParts[1] || repoName;
+              // Track current deployment result for the fix loop
+              let currentDeployResult = deployResult;
 
+              // Extract repo owner and name from URL (e.g., https://github.com/cosmic-community/my-app)
+              const urlParts = repositoryUrl ? repositoryUrl.replace('https://github.com/', '').split('/') : [];
+              const repoOwner = urlParts[0] || 'cosmic-community';
+              const repoNameFromUrl = urlParts[1] || repoName;
+
+              // Loop to offer AI fix for all build failures until success or user declines
+              while (!currentDeployResult.success && currentDeployResult.logs && currentDeployResult.logs.length > 0 && repositoryUrl) {
                 console.log();
                 console.log(chalk.yellow('  Would you like AI to analyze the logs and fix the build error?'));
                 const fixInput = await sharedAskLine!(chalk.yellow('  Fix with AI? [Y/n]: '));
                 const fixWithAI = fixInput.toLowerCase() !== 'n';
 
-                if (fixWithAI) {
-                  console.log();
-                  console.log(chalk.cyan('  Sending build logs to AI for analysis...'));
-                  console.log();
-
-                  // Format logs as text for the AI (filter out any logs with missing text)
-                  const logsText = deployResult.logs
-                    .filter(log => log.text && typeof log.text === 'string')
-                    .map(log => `[${log.type}] ${log.text}`)
-                    .join('\n');
-
-                  const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
-
-                  try {
-                    await streamingRepositoryUpdate({
-                      repositoryOwner: repoOwner,
-                      repositoryName: repoNameFromUrl,
-                      repositoryId,
-                      bucketSlug,
-                      messages: [{
-                        role: 'user',
-                        content: userMessage, // streamingRepositoryUpdate expects content as string
-                      }],
-                      onChunk: (chunk) => {
-                        process.stdout.write(chunk);
-                      },
-                      onComplete: () => {
-                        console.log();
-                        console.log();
-                        console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
-                        console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
-                        console.log();
-                      },
-                      onError: (error) => {
-                        console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
-                        console.log();
-                      },
-                    });
-
-                    // Wait a moment for Vercel to pick up the new commit, then poll again
-                    console.log(chalk.dim('  Waiting for new deployment to start...'));
-                    await new Promise(resolve => setTimeout(resolve, 10000));
-
-                    // Poll for the new deployment
-                    const fixDeployResult = await pollDeploymentStatus(bucketSlug, vercelProjectId, repositoryUrl);
-
-                    // If deployment succeeded after fix, switch to repo mode
-                    if (fixDeployResult.success && repositoryUrl) {
-                      isBuildMode = false;
-                      isRepoMode = true;
-                      currentRepo = {
-                        id: repositoryId || '',
-                        owner: repoOwner,
-                        name: repoNameFromUrl,
-                        branch: 'main',
-                      };
-                      console.log();
-                      console.log(chalk.green('  Switched to repository mode.'));
-                      console.log(chalk.dim(`  You can now make updates to ${repoOwner}/${repoNameFromUrl}`));
-                      console.log();
-                    }
-                  } catch (aiError) {
-                    console.log(chalk.red(`  ✗ Failed to fix with AI: ${(aiError as Error).message}`));
-                    console.log();
-                  }
+                if (!fixWithAI) {
+                  // User declined, exit the loop
+                  break;
                 }
-              } else if (deployResult.success && repositoryUrl) {
-                // Deployment succeeded on first try - switch to repo mode
-                const urlParts = repositoryUrl.replace('https://github.com/', '').split('/');
-                const repoOwner = urlParts[0] || 'cosmic-community';
-                const repoNameFromUrl = urlParts[1] || repoName;
-                const repositoryId = result.data?.repository_id || '';
 
+                console.log();
+                console.log(chalk.cyan('  Sending build logs to AI for analysis...'));
+                console.log();
+
+                // Format logs as text for the AI (filter out any logs with missing text)
+                const logsText = currentDeployResult.logs
+                  .filter(log => log.text && typeof log.text === 'string')
+                  .map(log => `[${log.type}] ${log.text}`)
+                  .join('\n');
+
+                const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
+
+                try {
+                  await streamingRepositoryUpdate({
+                    repositoryOwner: repoOwner,
+                    repositoryName: repoNameFromUrl,
+                    repositoryId,
+                    bucketSlug,
+                    messages: [{
+                      role: 'user',
+                      content: userMessage, // streamingRepositoryUpdate expects content as string
+                    }],
+                    onChunk: (chunk) => {
+                      process.stdout.write(chunk);
+                    },
+                    onComplete: () => {
+                      console.log();
+                      console.log();
+                      console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                      console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
+                      console.log();
+                    },
+                    onError: (error) => {
+                      console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                      console.log();
+                    },
+                  });
+
+                  // Wait a moment for Vercel to pick up the new commit, then poll again
+                  console.log(chalk.dim('  Waiting for new deployment to start...'));
+                  await new Promise(resolve => setTimeout(resolve, 10000));
+
+                  // Poll for the new deployment and update currentDeployResult for the next iteration
+                  currentDeployResult = await pollDeploymentStatus(bucketSlug, vercelProjectId, repositoryUrl);
+                } catch (aiError) {
+                  console.log(chalk.red(`  ✗ Failed to fix with AI: ${(aiError as Error).message}`));
+                  console.log();
+                  // Break out of the loop on AI error
+                  break;
+                }
+              }
+
+              // If deployment succeeded (either first try or after fixes), switch to repo mode
+              if (currentDeployResult.success && repositoryUrl) {
                 isBuildMode = false;
                 isRepoMode = true;
                 currentRepo = {
-                  id: repositoryId,
+                  id: repositoryId || '',
                   owner: repoOwner,
                   name: repoNameFromUrl,
                   branch: 'main',

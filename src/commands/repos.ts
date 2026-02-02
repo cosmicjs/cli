@@ -40,7 +40,7 @@ async function listRepositories(options: { json?: boolean }): Promise<void> {
 
     for (const repo of repositories) {
       table.push([
-        chalk.dim(repo.id.slice(0, 8)),
+        chalk.dim(repo.id),
         chalk.cyan(repo.repository_name),
         repo.framework || 'other',
         repo.branch || repo.default_branch || 'main',
@@ -81,17 +81,17 @@ async function getRepository(
     display.keyValue('Framework', repo.framework || 'other');
     display.keyValue('Default Branch', repo.branch || repo.default_branch || 'main');
     display.keyValue('GitHub URL', repo.repository_url);
-    
+
     if (repo.production_url) {
       display.keyValue('Production URL', chalk.green(repo.production_url));
     }
-    
+
     if (repo.vercel_project_id) {
       display.keyValue('Vercel Project', repo.vercel_project_id);
     }
-    
+
     display.keyValue('Created', display.formatDate(repo.created_at));
-    
+
     if (repo.updated_at) {
       display.keyValue('Updated', display.formatDate(repo.updated_at));
     }
@@ -175,7 +175,7 @@ async function connectRepository(options: {
 
   try {
     spinner.start('Connecting repository...');
-    
+
     const repo = await api.createRepository(bucketSlug, {
       repository_name: repoName,
       repository_url: repoUrl.endsWith('.git') ? repoUrl : `${repoUrl}.git`,

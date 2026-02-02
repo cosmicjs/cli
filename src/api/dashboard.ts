@@ -672,8 +672,8 @@ export async function getAgentExecution(
 // AI
 // ============================================================================
 
-export async function listModels(): Promise<AIModel[]> {
-  const response = await get<{ models: AIModel[] }>('/ai/models');
+export async function listModels(bucketSlug: string): Promise<AIModel[]> {
+  const response = await get<{ models: AIModel[] }>('/ai/models', { bucketSlug });
   return response.models || [];
 }
 

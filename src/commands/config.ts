@@ -311,8 +311,13 @@ async function projects(options: { workspace?: string; all?: boolean } = {}): Pr
  */
 async function models(): Promise<void> {
   try {
-    spinner.start('Loading models...');
     const bucketSlug = getCurrentBucketSlug();
+    if (!bucketSlug) {
+      display.error('No bucket selected. Navigate to a bucket first with: cosmic cd <project>/<bucket>');
+      process.exit(1);
+    }
+
+    spinner.start('Loading models...');
     const modelList = await api.listModels(bucketSlug);
     spinner.succeed(`Found ${modelList.length} model(s)`);
 
@@ -322,20 +327,20 @@ async function models(): Promise<void> {
     }
 
     const defaultModel = getDefaultModel();
-    
+
     console.log();
     console.log(chalk.bold('  Available AI Models:'));
     console.log(chalk.dim('  ' + '─'.repeat(70)));
-    
+
     for (const model of modelList) {
       if (!model) continue;
-      
+
       const modelAny = model as Record<string, unknown>;
       const id = String(modelAny.id || modelAny._id || 'unknown');
       const name = String(modelAny.name || id);
       const provider = String(modelAny.provider || '-');
       const isDefault = id === defaultModel;
-      
+
       if (isDefault) {
         console.log(chalk.green(`  ✓ ${id.padEnd(35)} ${name.padEnd(25)} ${provider}`));
       } else {

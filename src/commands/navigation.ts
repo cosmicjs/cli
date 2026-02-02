@@ -707,7 +707,7 @@ Use the install_content_model action to create ALL object types AND demo content
 3. Unsplash image URLs for thumbnails and file metafields (use real URLs like https://images.unsplash.com/photo-...)
 
 Remember to create types that are referenced by others FIRST (e.g., categories and authors before blog posts).`;
-        await startChat({ initialPrompt: createPrompt });
+        await startChat({ initialPrompt: createPrompt, contentMode: true });
       } else {
         display.newline();
         display.info(`Run ${chalk.cyan('cosmic chat')} to start AI chat later.`);
