@@ -1113,6 +1113,7 @@ export interface StreamingChatOptions {
   viewMode?: 'content-model' | 'build-app';
   selectedObjectTypes?: string[];
   links?: string[]; // URLs for the backend to crawl for context
+  media?: string[]; // Media IDs to attach to the last message (for vision)
   contextConfig?: {
     objects?: {
       enabled: boolean;
@@ -1145,6 +1146,7 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
     viewMode = 'build-app',
     selectedObjectTypes = [],
     links,
+    media,
     contextConfig,
     metadata: extraMetadata,
     onChunk,
@@ -1199,6 +1201,11 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
   // Add links for URL crawling if provided
   if (links && links.length > 0) {
     requestPayload.links = links;
+  }
+
+  // Add media IDs for vision (attach to last message)
+  if (media && media.length > 0) {
+    requestPayload.media = media;
   }
 
   let fullText = '';

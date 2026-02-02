@@ -36,6 +36,11 @@ import {
 } from '../api/dashboard.js';
 import * as api from '../api/dashboard.js';
 import * as display from '../utils/display.js';
+import {
+  extractImagePathsFromInput,
+  uploadImagesForChat,
+  stripPathsFromMessage,
+} from './mediaAttachment.js';
 import * as spinner from '../utils/spinner.js';
 import { select } from '../utils/prompts.js';
 
@@ -1169,6 +1174,9 @@ let isRepoMode = false;
 // Ask mode flag - when true (default), AI only answers questions without actions
 let isAskMode = true;
 
+// Media IDs for the current message (set when user attaches images via @path or paste)
+let pendingMediaIds: string[] = [];
+
 // Current chat context - object types, links, etc.
 let chatContext: ChatContext = {};
 
@@ -1795,10 +1803,30 @@ Generate complete, realistic content that matches what the code expects.` }],
           continue;
         }
 
-        // Add user message to history
+        // Extract and upload media attachments (@path or pasted file paths)
+        let messageText = input;
+        pendingMediaIds = [];
+        const cwd = process.cwd();
+        const extracted = extractImagePathsFromInput(input, cwd);
+
+        if (extracted.paths.length > 0) {
+          try {
+            spinner.start(`Uploading ${extracted.paths.length} image(s)...`);
+            pendingMediaIds = await uploadImagesForChat(extracted.paths, bucketSlug);
+            spinner.succeed(`Attached ${pendingMediaIds.length} image(s)`);
+            const stripped = stripPathsFromMessage(input, extracted.segmentsToStrip);
+            messageText = stripped || 'What can you tell me about this image?';
+          } catch (err) {
+            spinner.fail('Failed to upload images');
+            display.error((err as Error).message);
+            continue;
+          }
+        }
+
+        // Add user message to history (with paths stripped if we uploaded media)
         conversationHistory.push({
           role: 'user',
-          content: input,
+          content: messageText,
         });
 
         // Process message (loop while AI wants to continue, e.g., for multi-item creation)
@@ -3433,6 +3461,7 @@ async function processMessage(
           viewMode: 'build-app',
           selectedObjectTypes: objectTypeSlugs, // Include bucket's object types for context
           links: chatContext.links, // Pass links to backend for crawling
+          media: pendingMediaIds.length > 0 ? pendingMediaIds : undefined,
           metadata: {
             chat_mode: isAskMode ? 'ask' : 'agent', // Ask mode = educational answers only, no code generation
           },
@@ -3540,6 +3569,7 @@ async function processMessage(
           usage: undefined, // Dashboard API doesn't return usage in same format
           _alreadyStreamed: alreadyStreamedText, // Flag to skip duplicate display
         };
+        pendingMediaIds = []; // Clear after use
       } else if (isRepoMode && currentRepo) {
         // Use streamingRepositoryUpdate for repository update mode
         spinner.stop();
@@ -3826,6 +3856,7 @@ async function processMessage(
           viewMode: 'content-model',
           selectedObjectTypes: chatContext.objectTypes || [],
           links: chatContext.links, // Pass links to backend for crawling
+          media: pendingMediaIds.length > 0 ? pendingMediaIds : undefined,
           contextConfig,
           metadata: {
             chat_mode: isAskMode ? 'ask' : isContentMode ? 'content' : 'agent',
@@ -3884,6 +3915,7 @@ async function processMessage(
           usage: undefined,
           _alreadyStreamed: alreadyStreamedText || isContentModelMode,
         };
+        pendingMediaIds = []; // Clear after use
 
         // Check if AI response contains content to add to Cosmic CMS (metadata marker format)
         const extractedContent = extractContentFromResponse(fullText);
@@ -4560,6 +4592,7 @@ function printWelcomeScreen(model: string): void {
   console.log(leftLine(chalk.dim('Create and manage content:     ') + chalk.white('cosmic content')));
   console.log(leftLine(chalk.dim('Build and deploy a website:    ') + chalk.white('cosmic build')));
   console.log(leftLine(chalk.dim('Update an existing repository: ') + chalk.white('cosmic update')));
+  console.log(leftLine(chalk.dim('Attach images: ') + chalk.white('@./image.png') + chalk.dim(' or paste a file path')));
   console.log(emptyLine());
 
   console.log(hrMid());
@@ -4605,6 +4638,10 @@ function printHelp(): void {
   console.log(chalk.dim('  open') + '          - Open last deployment in browser');
   console.log(chalk.dim('  add content') + '   - Generate and add content to Cosmic CMS');
   console.log(chalk.dim('  help') + '          - Show this help');
+  console.log();
+  console.log(chalk.bold('Media attachments:'));
+  console.log(chalk.dim('  Use @path to attach images: ') + chalk.cyan('what\'s in this? @./screenshot.png'));
+  console.log(chalk.dim('  Or drag-drop/paste a file path - images are auto-detected and uploaded'));
   console.log();
 
   // Show current mode info

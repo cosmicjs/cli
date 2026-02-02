@@ -12,8 +12,7 @@ import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
-import { upload } from '../api/client.js';
-import type { Media } from '../types.js';
+import { getSDKClient } from '../api/sdk.js';
 
 /**
  * List media
@@ -119,8 +118,27 @@ async function getMedia(
   }
 }
 
+// MIME types for common file extensions
+const MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.pdf': 'application/pdf',
+};
+
+function getContentType(filePath: string): string {
+  const ext = filePath.toLowerCase().slice(filePath.lastIndexOf('.'));
+  return MIME_TYPES[ext] || 'application/octet-stream';
+}
+
 /**
  * Upload media
+ * Uses SDK media.insertOne() which hits the correct REST API endpoint
  */
 async function uploadMedia(
   filePath: string,
@@ -143,6 +161,7 @@ async function uploadMedia(
 
     const fileBuffer = readFileSync(filePath);
     const filename = basename(filePath);
+    const contentType = getContentType(filePath);
 
     let metadata: Record<string, unknown> | undefined;
     if (options.metadata) {
@@ -154,29 +173,35 @@ async function uploadMedia(
       }
     }
 
-    const response = await upload<{ media: Media }>(
-      '/media/upload',
-      fileBuffer,
-      filename,
-      {
-        bucketSlug,
-        metadata: {
-          folder: options.folder,
-          ...metadata,
-        },
-      }
-    );
+    const sdk = getSDKClient(bucketSlug);
+    if (!sdk) {
+      spinner.fail('SDK client not available');
+      display.error('Ensure bucket credentials (read key, write key) are configured.');
+      process.exit(1);
+    }
 
-    spinner.succeed(`Uploaded: ${chalk.cyan(response.media.name)}`);
+    const result = await sdk.media.insertOne({
+      media: fileBuffer,
+      filename,
+      contentType,
+      folder: options.folder,
+      metadata,
+    });
+
+    const media = (result as { media?: { id: string; name: string; url?: string; imgix_url?: string } }).media;
+    if (!media) {
+      spinner.fail('Upload succeeded but no media returned');
+      process.exit(1);
+    }
+
+    spinner.succeed(`Uploaded: ${chalk.cyan(media.name)}`);
 
     if (options.json) {
-      display.json(response.media);
+      display.json(media);
     } else {
-      display.keyValue('ID', response.media.id);
-      display.keyValue('URL', response.media.url);
-      if (response.media.imgix_url) {
-        display.keyValue('Imgix URL', response.media.imgix_url);
-      }
+      display.keyValue('ID', media.id);
+      if (media.url) display.keyValue('URL', media.url);
+      if (media.imgix_url) display.keyValue('Imgix URL', media.imgix_url);
     }
   } catch (error) {
     spinner.fail('Failed to upload media');
