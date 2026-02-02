@@ -108,6 +108,50 @@ async function getAgent(
 }
 
 /**
+ * Build agent context from CLI options (matches chat/build/repo context format)
+ */
+function buildAgentContext(options: {
+  types?: string;
+  links?: string;
+  objectsLimit?: string;
+  objectsDepth?: string;
+}): Record<string, unknown> | undefined {
+  const objectTypes = options.types
+    ? options.types.split(',').map((t) => t.trim()).filter(Boolean)
+    : [];
+  const links = options.links
+    ? options.links.split(',').map((l) => l.trim()).filter(Boolean)
+    : [];
+  const limit = options.objectsLimit ? parseInt(options.objectsLimit, 10) : 100;
+  const depth = options.objectsDepth ? parseInt(options.objectsDepth, 10) : 1;
+
+  if (objectTypes.length === 0 && links.length === 0) {
+    return undefined;
+  }
+
+  const context: Record<string, unknown> = {
+    objects: {
+      enabled: true,
+      object_types: objectTypes.length > 0 ? objectTypes : undefined,
+      include_models: true,
+      limit,
+      depth,
+    },
+    bucket: {
+      enabled: true,
+      include_object_types: true,
+      include_media: false,
+    },
+  };
+
+  if (links.length > 0) {
+    context.links = links;
+  }
+
+  return context;
+}
+
+/**
  * Create agent with interactive flow for repository agents
  */
 async function createAgent(options: {
@@ -125,6 +169,10 @@ async function createAgent(options: {
   json?: boolean;
   interactive?: boolean;
   run?: boolean;
+  types?: string;
+  links?: string;
+  objectsLimit?: string;
+  objectsDepth?: string;
 }): Promise<void> {
   const bucketSlug = requireBucket();
   const isRepository = options.type === 'repository';
@@ -188,7 +236,7 @@ async function createAgent(options: {
   const prompt =
     options.prompt ||
     (await prompts.text({
-      message: isRepository 
+      message: isRepository
         ? 'What would you like the agent to do with the code?'
         : 'Prompt (instructions for the agent):',
       required: true,
@@ -196,6 +244,13 @@ async function createAgent(options: {
 
   try {
     spinner.start('Creating agent...');
+
+    const context = buildAgentContext({
+      types: options.types,
+      links: options.links,
+      objectsLimit: options.objectsLimit,
+      objectsDepth: options.objectsDepth,
+    });
 
     const data: api.CreateAgentData = {
       agent_name: name,
@@ -209,6 +264,7 @@ async function createAgent(options: {
       goal: options.goal,
       email_notifications: options.emailNotifications,
       require_approval: options.requireApproval,
+      context,
     };
 
     const agent = await api.createAgent(bucketSlug, data);
@@ -221,7 +277,7 @@ async function createAgent(options: {
 
     display.keyValue('ID', agent.id);
     display.keyValue('Type', agent.agent_type);
-    
+
     if (isRepository) {
       display.keyValue('Repository', repositoryId || '-');
       display.keyValue('Base Branch', baseBranch || '-');
@@ -276,7 +332,7 @@ async function runAgent(
     }
 
     const executionId = execution.id || execution.execution_id || (execution as any)._id;
-    
+
     display.keyValue('Execution ID', executionId || 'Started (check dashboard for details)');
     display.keyValue('Status', display.formatStatus(execution.status || 'pending'));
 
@@ -562,6 +618,10 @@ export function createAgentsCommands(program: Command): void {
     .option('--base-branch <branch>', 'Base branch (for repository type)')
     .option('--start-url <url>', 'Start URL (for computer_use type)')
     .option('--goal <goal>', 'Goal (for computer_use type)')
+    .option('--types <types>', 'Object type slugs for context (comma-separated)')
+    .option('-l, --links <urls>', 'External URLs for context (comma-separated)')
+    .option('--objects-limit <n>', 'Max objects per type for context (default: 100)', '100')
+    .option('--objects-depth <n>', 'Object depth for nested metafields (default: 1)', '1')
     .option('--email-notifications', 'Enable email notifications')
     .option('--require-approval', 'Require approval before execution')
     .option('--run', 'Run the agent immediately after creation')

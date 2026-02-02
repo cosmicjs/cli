@@ -79,6 +79,8 @@ program
   .option('-p, --prompt <prompt>', 'Start with an initial prompt')
   .option('-t, --types <types>', 'Object type slugs to include as context (comma-separated)')
   .option('-l, --links <urls>', 'External URLs to include as context (comma-separated)')
+  .option('--objects-limit <n>', 'Max objects per type for context (default: 10 for content, 100 for build)')
+  .option('--objects-depth <n>', 'Object depth for nested metafields (default: 1)')
   .action(async (options) => {
     let initialPrompt = options.prompt;
 
@@ -88,12 +90,18 @@ program
     }
 
     // Parse context options
-    const context: { objectTypes?: string[]; links?: string[] } = {};
+    const context: { objectTypes?: string[]; links?: string[]; objectsLimit?: number; objectsDepth?: number } = {};
     if (options.types) {
       context.objectTypes = options.types.split(',').map((t: string) => t.trim());
     }
     if (options.links) {
       context.links = options.links.split(',').map((l: string) => l.trim());
+    }
+    if (options.objectsLimit) {
+      context.objectsLimit = parseInt(options.objectsLimit, 10);
+    }
+    if (options.objectsDepth) {
+      context.objectsDepth = parseInt(options.objectsDepth, 10);
     }
 
     // In repo mode, don't set an initial prompt - let the user type their request
@@ -120,13 +128,21 @@ program
   .option('-a, --ask', 'Ask mode - questions about content without making changes')
   .option('-t, --types <types>', 'Object type slugs to work with (comma-separated)')
   .option('-l, --links <urls>', 'External URLs to include as context (comma-separated)')
+  .option('--objects-limit <n>', 'Max objects per type for context (default: 10)')
+  .option('--objects-depth <n>', 'Object depth for nested metafields (default: 1)')
   .action(async (options) => {
-    const context: { objectTypes?: string[]; links?: string[] } = {};
+    const context: { objectTypes?: string[]; links?: string[]; objectsLimit?: number; objectsDepth?: number } = {};
     if (options.types) {
       context.objectTypes = options.types.split(',').map((t: string) => t.trim());
     }
     if (options.links) {
       context.links = options.links.split(',').map((l: string) => l.trim());
+    }
+    if (options.objectsLimit) {
+      context.objectsLimit = parseInt(options.objectsLimit, 10);
+    }
+    if (options.objectsDepth) {
+      context.objectsDepth = parseInt(options.objectsDepth, 10);
     }
 
     await startChat({
@@ -147,13 +163,21 @@ program
   .option('-a, --ask', 'Ask mode - questions about the app without generating code')
   .option('-t, --types <types>', 'Object type slugs to include as context (comma-separated)')
   .option('-l, --links <urls>', 'External URLs to include as context (comma-separated)')
+  .option('--objects-limit <n>', 'Max objects per type for context (default: 100)')
+  .option('--objects-depth <n>', 'Object depth for nested metafields (default: 1)')
   .action(async (options) => {
-    const context: { objectTypes?: string[]; links?: string[] } = {};
+    const context: { objectTypes?: string[]; links?: string[]; objectsLimit?: number; objectsDepth?: number } = {};
     if (options.types) {
       context.objectTypes = options.types.split(',').map((t: string) => t.trim());
     }
     if (options.links) {
       context.links = options.links.split(',').map((l: string) => l.trim());
+    }
+    if (options.objectsLimit) {
+      context.objectsLimit = parseInt(options.objectsLimit, 10);
+    }
+    if (options.objectsDepth) {
+      context.objectsDepth = parseInt(options.objectsDepth, 10);
     }
 
     const isAskMode = options.ask || false;
@@ -184,13 +208,21 @@ program
   .option('-a, --ask', 'Ask mode - explore/understand code without making changes')
   .option('-t, --types <types>', 'Object type slugs to include as context (comma-separated)')
   .option('-l, --links <urls>', 'External URLs to include as context (comma-separated)')
+  .option('--objects-limit <n>', 'Max objects per type for context (default: 100)')
+  .option('--objects-depth <n>', 'Object depth for nested metafields (default: 1)')
   .action(async (repoArg, options) => {
-    const context: { objectTypes?: string[]; links?: string[] } = {};
+    const context: { objectTypes?: string[]; links?: string[]; objectsLimit?: number; objectsDepth?: number } = {};
     if (options.types) {
       context.objectTypes = options.types.split(',').map((t: string) => t.trim());
     }
     if (options.links) {
       context.links = options.links.split(',').map((l: string) => l.trim());
+    }
+    if (options.objectsLimit) {
+      context.objectsLimit = parseInt(options.objectsLimit, 10);
+    }
+    if (options.objectsDepth) {
+      context.objectsDepth = parseInt(options.objectsDepth, 10);
     }
 
     // Only set initial prompt if explicitly provided via -p flag

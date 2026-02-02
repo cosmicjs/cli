@@ -1685,7 +1685,7 @@ export async function startChat(options: ChatOptions): Promise<void> {
           console.log(chalk.dim(`  Mode: ${isAskMode ? 'Ask (read-only)' : isContentMode ? 'Content' : isRepoMode ? 'Repository' : isBuildMode ? 'Build' : 'Agent'}`));
 
           // Show chat context details
-          if (chatContext.objectTypes?.length || chatContext.links?.length) {
+          if (chatContext.objectTypes?.length || chatContext.links?.length || chatContext.objectsLimit || chatContext.objectsDepth) {
             console.log();
             console.log(chalk.bold('AI Context:'));
             if (chatContext.objectTypes && chatContext.objectTypes.length > 0) {
@@ -1694,10 +1694,16 @@ export async function startChat(options: ChatOptions): Promise<void> {
             if (chatContext.links && chatContext.links.length > 0) {
               console.log(chalk.dim(`  External Links: ${chatContext.links.join(', ')}`));
             }
+            if (chatContext.objectsLimit) {
+              console.log(chalk.dim(`  Objects Limit: ${chatContext.objectsLimit}`));
+            }
+            if (chatContext.objectsDepth) {
+              console.log(chalk.dim(`  Objects Depth: ${chatContext.objectsDepth}`));
+            }
           } else {
             console.log();
             console.log(chalk.dim('  No additional context configured.'));
-            console.log(chalk.dim('  Use --content, --types, or --links flags when starting chat.'));
+            console.log(chalk.dim('  Use --content, --types, --links, --objects-limit, or --objects-depth when starting chat.'));
           }
           console.log();
           continue;
@@ -1878,9 +1884,16 @@ function getAskModeSystemPrompt(bucketSlug: string): string {
     contextSection += `\n\n**Object Types in Context:** ${chatContext.objectTypes.join(', ')}`;
   }
 
-  // Add links context info  
+  // Add links context info
   if (chatContext.links && chatContext.links.length > 0) {
     contextSection += `\n\n**External Links in Context:** ${chatContext.links.join(', ')}`;
+  }
+
+  if (chatContext.objectsLimit) {
+    contextSection += `\n\n**Objects Limit:** ${chatContext.objectsLimit}`;
+  }
+  if (chatContext.objectsDepth) {
+    contextSection += `\n\n**Objects Depth:** ${chatContext.objectsDepth}`;
   }
 
   // Add fetched context data (actual content)
@@ -3453,17 +3466,34 @@ async function processMessage(
         let hasShownOverview = false;
         let overviewPrinted = 0;
 
+        // Use chatContext.objectTypes when specified, otherwise all bucket object types
+        const selectedTypes = (chatContext.objectTypes && chatContext.objectTypes.length > 0)
+          ? chatContext.objectTypes
+          : objectTypeSlugs;
+        const buildContextConfig = (selectedTypes.length > 0 || chatContext.objectsLimit || chatContext.objectsDepth)
+          ? {
+            objects: {
+              enabled: true,
+              object_types: selectedTypes.length > 0 ? selectedTypes : undefined,
+              include_models: true,
+              limit: chatContext.objectsLimit ?? 100,
+              depth: chatContext.objectsDepth ?? 1,
+            },
+          }
+          : undefined;
+
         const result = await api.streamingChat({
           messages: dashboardMessages,
           bucketSlug,
           model,
           maxTokens,
           viewMode: 'build-app',
-          selectedObjectTypes: objectTypeSlugs, // Include bucket's object types for context
-          links: chatContext.links, // Pass links to backend for crawling
+          selectedObjectTypes: selectedTypes,
+          links: chatContext.links,
           media: pendingMediaIds.length > 0 ? pendingMediaIds : undefined,
+          contextConfig: buildContextConfig,
           metadata: {
-            chat_mode: isAskMode ? 'ask' : 'agent', // Ask mode = educational answers only, no code generation
+            chat_mode: isAskMode ? 'ask' : 'agent',
           },
           onChunk: (chunk) => {
             fullText += chunk;
@@ -3843,7 +3873,8 @@ async function processMessage(
             enabled: true,
             object_types: chatContext.objectTypes,
             include_models: true,
-            limit: chatContext.objectsLimit || 10,
+            limit: chatContext.objectsLimit ?? 10,
+            depth: chatContext.objectsDepth ?? 1,
             props: ['id', 'title', 'slug', 'metadata', 'content'],
           },
         } : undefined;

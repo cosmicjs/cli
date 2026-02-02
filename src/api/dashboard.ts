@@ -1120,6 +1120,7 @@ export interface StreamingChatOptions {
       object_types?: string[];
       include_models?: boolean;
       limit?: number;
+      depth?: number;
       props?: string[];
     };
   };
