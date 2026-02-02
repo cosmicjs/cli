@@ -387,7 +387,7 @@ export async function getMedia(bucketSlug: string, mediaId: string): Promise<Med
 }
 
 export async function deleteMedia(bucketSlug: string, mediaIds: string[]): Promise<void> {
-  await post('/media/deleteByIds', { ids: mediaIds }, { bucketSlug });
+  await post('/media/deleteByIds', { slug: bucketSlug, media_ids: mediaIds });
 }
 
 // ============================================================================

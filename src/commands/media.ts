@@ -224,10 +224,11 @@ async function deleteMedia(
     process.exit(1);
   }
 
-  // Confirm deletion
+  // Confirm deletion (default: yes - press Enter to confirm, n+Enter to cancel)
   if (!options.force) {
     const confirmed = await prompts.confirm({
       message: `Delete ${mediaIds.length} media file(s)? This cannot be undone.`,
+      initial: true,
     });
 
     if (!confirmed) {
