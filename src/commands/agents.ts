@@ -10,6 +10,7 @@ import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
+import { captureAuthWithDoneButton, formatCookiesForApi, formatLocalStorageForApi } from '../auth/capture.js';
 
 /**
  * Default AI models by agent type
@@ -236,6 +237,8 @@ async function createAgent(options: {
   scheduleType?: 'once' | 'recurring';
   scheduleFrequency?: 'hourly' | 'daily' | 'weekly' | 'monthly';
   timezone?: string;
+  // Auth session for computer use agents
+  authSession?: string;
 }): Promise<void> {
   const bucketSlug = requireBucket();
   const agentType = normalizeAgentType(options.type);
@@ -327,6 +330,11 @@ async function createAgent(options: {
       timezone: options.timezone || 'UTC',
     } : undefined;
 
+    // Build auth_sessions for computer_use agents if session ID provided
+    const authSessions = options.authSession && agentType === 'computer_use'
+      ? [{ session_id: options.authSession }]
+      : undefined;
+
     const data: api.CreateAgentData = {
       agent_name: name,
       agent_type: agentType,
@@ -338,6 +346,7 @@ async function createAgent(options: {
       start_url: options.startUrl,
       goal: options.goal,
       schedule,
+      auth_sessions: authSessions,
       email_notifications: options.emailNotifications,
       require_approval: options.requireApproval,
       context,
@@ -854,6 +863,68 @@ async function approveOperations(
 }
 
 /**
+ * Capture auth from local browser for computer use agents
+ */
+async function captureAuth(options: {
+  url: string;
+  label?: string;
+  timeout?: string;
+  json?: boolean;
+}): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  try {
+    display.info('Opening local browser for authentication...');
+    display.info(chalk.yellow('Please log in to the site, then click "Done - Capture Auth" in the banner.'));
+    display.newline();
+
+    const timeoutMs = parseInt(options.timeout || '600', 10) * 1000;
+
+    // Capture auth from local browser
+    const result = await captureAuthWithDoneButton(options.url, {
+      timeout: timeoutMs,
+      onStatus: (message) => console.log(chalk.gray(message)),
+    });
+
+    display.newline();
+    spinner.start('Uploading auth session to Cosmic...');
+
+    // Format cookies for the API
+    const formattedCookies = formatCookiesForApi(result.authState.cookies);
+
+    // Upload to Cosmic API
+    const response = await api.importAuthSession(bucketSlug, {
+      url: result.url,
+      cookies: formattedCookies,
+      localStorage: result.authState.localStorage,
+      label: options.label,
+    });
+
+    spinner.succeed('Auth session created');
+
+    if (options.json) {
+      display.json(response);
+      return;
+    }
+
+    display.newline();
+    display.keyValue('Session ID', response.session_id);
+    display.keyValue('Label', response.auth_info.label);
+    display.keyValue('Cookies', response.auth_info.cookies_count.toString());
+    display.keyValue('LocalStorage Items', response.auth_info.localStorage_count.toString());
+    display.newline();
+
+    display.success('Auth session captured successfully!');
+    display.info(`Use this session when creating a computer use agent:`);
+    display.info(chalk.cyan(`  cosmic agents create --type computer_use --auth-session ${response.session_id} ...`));
+  } catch (error) {
+    spinner.fail('Failed to capture auth');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Create agents commands
  */
 export function createAgentsCommands(program: Command): void {
@@ -897,6 +968,7 @@ export function createAgentsCommands(program: Command): void {
     .option('--schedule-type <type>', 'Schedule type: once or recurring (default: recurring)')
     .option('--schedule-frequency <freq>', 'Run frequency: hourly, daily, weekly, monthly (default: daily)')
     .option('--timezone <tz>', 'Timezone for schedule (default: UTC)')
+    .option('--auth-session <sessionId>', 'Pre-auth session ID for computer_use agents (from capture-auth)')
     .option('--run', 'Run the agent immediately after creation')
     .option('--json', 'Output as JSON')
     .action(createAgent);
@@ -952,6 +1024,16 @@ export function createAgentsCommands(program: Command): void {
       }
       return listAgentExecutions(agentId, options);
     });
+
+  // Auth capture commands for computer use agents
+  agentsCmd
+    .command('capture-auth')
+    .description('Capture authentication from local browser for computer use agents')
+    .requiredOption('-u, --url <url>', 'URL to authenticate on')
+    .option('-l, --label <label>', 'Label for this auth session')
+    .option('--timeout <seconds>', 'Timeout in seconds (default: 600)', '600')
+    .option('--json', 'Output as JSON')
+    .action(captureAuth);
 }
 
 export default { createAgentsCommands };

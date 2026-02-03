@@ -789,6 +789,11 @@ export interface CreateAgentData {
     next_run_at?: string;
     timezone?: string;
   };
+  // Auth sessions for computer use agents (pre-authenticated browser sessions)
+  auth_sessions?: Array<{
+    session_id: string;
+    auth_state?: unknown;
+  }>;
   email_notifications?: boolean;
   require_approval?: boolean;
 }
@@ -892,6 +897,102 @@ export async function getAgentExecution(
   );
   // Handle { execution: {...} }, { data: {...} }, or direct response formats
   return response.execution || response.data || (response as unknown as AgentExecution);
+}
+
+// ============================================================================
+// Pre-Auth Sessions (Computer Use)
+// ============================================================================
+
+import axios from 'axios';
+import { getWorkersUrl } from '../config/store.js';
+import { getAuthHeaders } from '../auth/manager.js';
+
+export interface PreAuthSession {
+  session_id: string;
+  status: 'awaiting_auth' | 'auth_captured' | 'failed';
+  start_url: string;
+  auth_info?: {
+    label: string;
+    cookies_count: number;
+    localStorage_count?: number;
+    captured_at: string;
+    manual_import?: boolean;
+  };
+  created_at: string;
+}
+
+export interface ImportAuthData {
+  url: string;
+  cookies: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    expires?: number;
+    httpOnly?: boolean;
+    secure?: boolean;
+    sameSite?: string;
+  }>;
+  localStorage?: Record<string, string> | Array<{ name: string; value: string }>;
+  label?: string;
+}
+
+export interface ImportAuthResponse {
+  success: boolean;
+  session_id: string;
+  auth_info: {
+    label: string;
+    cookies_count: number;
+    localStorage_count: number;
+    captured_at: string;
+    manual_import: boolean;
+  };
+}
+
+/**
+ * Import auth state captured from local browser
+ * Uses the manual-import endpoint in cosmic-workers
+ */
+export async function importAuthSession(
+  bucketSlug: string,
+  data: ImportAuthData
+): Promise<ImportAuthResponse> {
+  const workersUrl = getWorkersUrl();
+  const authHeaders = getAuthHeaders();
+
+  const response = await axios.post<ImportAuthResponse>(
+    `${workersUrl}/buckets/${bucketSlug}/computer-use/pre-auth/manual-import`,
+    data,
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+    }
+  );
+
+  return response.data;
+}
+
+/**
+ * Delete a pre-auth session
+ */
+export async function deleteAuthSession(
+  bucketSlug: string,
+  sessionId: string
+): Promise<void> {
+  const workersUrl = getWorkersUrl();
+  const authHeaders = getAuthHeaders();
+
+  await axios.delete(
+    `${workersUrl}/buckets/${bucketSlug}/computer-use/pre-auth/${sessionId}`,
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+    }
+  );
 }
 
 // ============================================================================

@@ -205,6 +205,11 @@ export interface AgentSchedule {
   timezone?: string;
 }
 
+export interface AgentAuthSession {
+  session_id: string;
+  auth_state?: unknown;
+}
+
 export interface Agent {
   id: string;
   agent_name: string;
@@ -218,6 +223,7 @@ export interface Agent {
   goal?: string;
   context?: Record<string, unknown>;
   schedule?: AgentSchedule;
+  auth_sessions?: AgentAuthSession[];
   email_notifications?: boolean;
   require_approval?: boolean;
   created_at: string;
