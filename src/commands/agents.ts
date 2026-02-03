@@ -12,6 +12,22 @@ import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
 
 /**
+ * Default AI models by agent type
+ */
+const DEFAULT_MODELS = {
+  content: 'claude-opus-4-5-20251101',
+  repository: 'claude-opus-4-5-20251101',
+  computer_use: 'claude-haiku-4-5-20251001',
+} as const;
+
+/**
+ * Get the default model for an agent type
+ */
+function getDefaultModelForAgentType(agentType: 'content' | 'repository' | 'computer_use'): string {
+  return DEFAULT_MODELS[agentType];
+}
+
+/**
  * List agents
  */
 async function listAgents(options: { json?: boolean }): Promise<void> {
@@ -277,11 +293,14 @@ async function createAgent(options: {
       objectsDepth: options.objectsDepth,
     });
 
+    // Use provided model or default based on agent type
+    const model = options.model || getDefaultModelForAgentType(agentType);
+
     const data: api.CreateAgentData = {
       agent_name: name,
       agent_type: agentType,
       prompt,
-      model: options.model,
+      model,
       emoji: options.emoji || (isRepository ? '🔧' : '🤖'),
       repository_id: repositoryId,
       base_branch: baseBranch,
@@ -825,7 +844,7 @@ export function createAgentsCommands(program: Command): void {
     .requiredOption('-t, --type <type>', 'Agent type (content, code/repo/repository, computer_use)')
     .option('-n, --name <name>', 'Agent name')
     .option('-p, --prompt <prompt>', 'Agent prompt')
-    .option('-m, --model <model>', 'AI model to use')
+    .option('-m, --model <model>', 'AI model (default: opus-4.5 for content/repo, haiku-4.5 for computer_use)')
     .option('-e, --emoji <emoji>', 'Agent emoji')
     .option('--repository-id <id>', 'Repository ID (for repository type)')
     .option('--base-branch <branch>', 'Base branch (for repository type)')

@@ -3,7 +3,7 @@
  * Wraps the Cosmic Dashboard API endpoints
  */
 
-import { get, post, patch, del } from './client.js';
+import { get, post, put, patch, del } from './client.js';
 import type {
   Workspace,
   Project,
@@ -559,23 +559,56 @@ export async function listWorkflows(
   if (options.limit) params.limit = options.limit;
   if (options.skip) params.skip = options.skip;
 
-  const response = await get<{ workflows: Workflow[] }>('/ai/workflows', {
+  const response = await get<Record<string, unknown>>('/ai/workflows', {
     bucketSlug,
     params,
   });
 
-  return response.workflows || [];
+  // Handle different response formats
+  // API returns: { data: { workflows: [...] } } or { workflows: [...] }
+  if (response && typeof response === 'object') {
+    // Check for nested data.workflows (dashboard API format)
+    const data = response.data as Record<string, unknown> | undefined;
+    if (data && typeof data === 'object' && Array.isArray(data.workflows)) {
+      return data.workflows as Workflow[];
+    }
+
+    // Check for direct workflows array
+    if (Array.isArray(response.workflows)) {
+      return response.workflows as Workflow[];
+    }
+
+    // Check for direct array
+    if (Array.isArray(response)) {
+      return response as Workflow[];
+    }
+  }
+
+  // If we can't find workflows, return empty array
+  return [];
 }
 
 export async function getWorkflow(
   bucketSlug: string,
   workflowId: string
 ): Promise<Workflow> {
-  const response = await get<{ workflow: Workflow }>(
+  const response = await get<Record<string, unknown>>(
     `/ai/workflows/${workflowId}`,
     { bucketSlug }
   );
-  return response.workflow;
+
+  // Handle nested data.workflow (API format)
+  const data = response.data as Record<string, unknown> | undefined;
+  if (data && typeof data === 'object' && data.workflow) {
+    return data.workflow as Workflow;
+  }
+
+  // Handle direct workflow
+  if (response.workflow) {
+    return response.workflow as Workflow;
+  }
+
+  throw new Error('Workflow not found');
 }
 
 export interface CreateWorkflowData {
@@ -605,12 +638,25 @@ export async function updateWorkflow(
   workflowId: string,
   data: Partial<CreateWorkflowData>
 ): Promise<Workflow> {
-  const response = await patch<{ workflow?: Workflow; data?: Workflow; success?: boolean } & Workflow>(
+  const response = await put<Record<string, unknown>>(
     `/ai/workflows/${workflowId}`,
     data,
     { bucketSlug }
   );
-  return response.workflow || response.data || response;
+
+  // Handle nested data.workflow (API format)
+  const responseData = response.data as Record<string, unknown> | undefined;
+  if (responseData && typeof responseData === 'object' && responseData.workflow) {
+    return responseData.workflow as Workflow;
+  }
+
+  // Handle direct workflow
+  if (response.workflow) {
+    return response.workflow as Workflow;
+  }
+
+  // Handle response being the workflow itself
+  return response as unknown as Workflow;
 }
 
 export async function deleteWorkflow(
@@ -629,12 +675,25 @@ export async function executeWorkflow(
   workflowId: string,
   options: ExecuteWorkflowOptions = {}
 ): Promise<WorkflowExecution> {
-  const response = await post<{ execution: WorkflowExecution }>(
+  const response = await post<Record<string, unknown>>(
     `/ai/workflows/${workflowId}/execute`,
     options,
     { bucketSlug }
   );
-  return response.execution;
+
+  // Handle nested data.execution (API format)
+  const data = response.data as Record<string, unknown> | undefined;
+  if (data && typeof data === 'object' && data.execution) {
+    return data.execution as WorkflowExecution;
+  }
+
+  // Handle direct execution
+  if (response.execution) {
+    return response.execution as WorkflowExecution;
+  }
+
+  // Return the response itself as a fallback
+  return response as unknown as WorkflowExecution;
 }
 
 export async function listExecutions(
@@ -662,11 +721,24 @@ export async function getExecution(
   bucketSlug: string,
   executionId: string
 ): Promise<WorkflowExecution> {
-  const response = await get<{ execution: WorkflowExecution }>(
+  const response = await get<Record<string, unknown>>(
     `/ai/executions/${executionId}`,
     { bucketSlug }
   );
-  return response.execution;
+
+  // Handle nested data.execution (API format)
+  const data = response.data as Record<string, unknown> | undefined;
+  if (data && typeof data === 'object' && data.execution) {
+    return data.execution as WorkflowExecution;
+  }
+
+  // Handle direct execution
+  if (response.execution) {
+    return response.execution as WorkflowExecution;
+  }
+
+  // Return the response itself as a fallback
+  return response as unknown as WorkflowExecution;
 }
 
 export async function cancelExecution(
@@ -1326,7 +1398,7 @@ export interface StreamingChatOptions {
   bucketSlug: string;
   model?: string;
   maxTokens?: number;
-  viewMode?: 'content-model' | 'build-app';
+  viewMode?: 'content-model' | 'build-app' | 'agent' | 'ask';
   selectedObjectTypes?: string[];
   links?: string[]; // URLs for the backend to crawl for context
   media?: string[]; // Media IDs to attach to the last message (for vision)

@@ -10,6 +10,7 @@ import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
+import type { Agent, WorkflowStep } from '../types.js';
 
 /**
  * List workflows
@@ -29,15 +30,18 @@ async function listWorkflows(options: {
       schedule_type: options.scheduleType as 'manual' | 'cron' | 'event_triggered',
       limit: options.limit ? parseInt(options.limit, 10) : undefined,
     });
-    spinner.succeed(`Found ${workflows.length} workflow(s)`);
 
-    if (workflows.length === 0) {
+    // Ensure workflows is an array
+    const workflowList = Array.isArray(workflows) ? workflows : [];
+    spinner.succeed(`Found ${workflowList.length} workflow(s)`);
+
+    if (workflowList.length === 0) {
       display.info('No workflows found');
       return;
     }
 
     if (options.json) {
-      display.json(workflows);
+      display.json(workflowList);
       return;
     }
 
@@ -45,12 +49,12 @@ async function listWorkflows(options: {
       head: ['ID', 'Name', 'Status', 'Schedule', 'Steps'],
     });
 
-    for (const workflow of workflows) {
+    for (const workflow of workflowList) {
       table.push([
-        chalk.dim(workflow.id.slice(0, 8)),
-        display.truncate(workflow.workflow_name, 35),
-        display.formatStatus(workflow.status),
-        workflow.schedule_type,
+        chalk.dim(workflow.id || '-'),
+        display.truncate(workflow.workflow_name || 'Untitled', 35),
+        display.formatStatus(workflow.status || 'draft'),
+        workflow.schedule_type || 'manual',
         String(workflow.steps?.length || 0),
       ]);
     }
@@ -95,11 +99,17 @@ async function getWorkflow(
     if (workflow.steps && workflow.steps.length > 0) {
       display.subheader(`Steps (${workflow.steps.length})`);
       workflow.steps.forEach((step, index) => {
+        // Handle both flat and nested config structures
+        const stepAny = step as Record<string, unknown>;
+        const config = stepAny.config as Record<string, unknown> | undefined;
+        const stepName = stepAny.name || stepAny.agent_name || 'Unnamed';
+        const stepEmoji = config?.emoji || stepAny.emoji || '🤖';
+        const stepPrompt = config?.prompt || stepAny.prompt;
         console.log(
-          `  ${chalk.dim(String(index + 1) + '.')} ${step.emoji || '🤖'} ${chalk.cyan(step.agent_name)} (${step.agent_type})`
+          `  ${chalk.dim(String(index + 1) + '.')} ${stepEmoji} ${chalk.cyan(stepName)} (${step.agent_type})`
         );
-        if (step.prompt) {
-          console.log(`     ${chalk.dim(display.truncate(step.prompt, 60))}`);
+        if (stepPrompt) {
+          console.log(`     ${chalk.dim(display.truncate(String(stepPrompt), 60))}`);
         }
       });
     }
@@ -154,12 +164,17 @@ async function executeWorkflow(
       return;
     }
 
-    display.keyValue('Execution ID', execution.id);
-    display.keyValue('Status', display.formatStatus(execution.status));
+    // Handle potentially undefined execution properties
+    const execData = execution as Record<string, unknown>;
+    const execId = execData.id || execData._id || 'unknown';
+    const execStatus = (execData.status as string) || 'pending';
+
+    display.keyValue('Execution ID', String(execId));
+    display.keyValue('Status', display.formatStatus(execStatus));
 
     display.newline();
     display.info(
-      `Track progress with: ${chalk.cyan(`cosmic workflows executions ${execution.id}`)}`
+      `Track progress with: ${chalk.cyan(`cosmic workflows executions ${execId}`)}`
     );
   } catch (error) {
     spinner.fail('Failed to execute workflow');
@@ -239,38 +254,56 @@ async function getExecution(
       return;
     }
 
+    // Handle potentially undefined execution properties
+    const execData = execution as Record<string, unknown>;
+    const execId = String(execData.id || execData._id || executionId);
+    const execWorkflowId = String(execData.workflow_id || '-');
+    const execStatus = String(execData.status || 'unknown');
+    const execTrigger = String(execData.trigger_type || 'manual');
+    const execStarted = execData.started_at as string | undefined;
+    const execCompleted = execData.completed_at as string | undefined;
+    const execCurrentStep = execData.current_step as number | undefined;
+    const execError = execData.error as string | undefined;
+    // API returns 'steps' not 'step_results'
+    const execSteps = (execData.steps || execData.step_results) as Array<Record<string, unknown>> | undefined;
+
     display.header('Workflow Execution');
-    display.keyValue('ID', execution.id);
-    display.keyValue('Workflow ID', execution.workflow_id);
-    display.keyValue('Status', display.formatStatus(execution.status));
-    display.keyValue('Trigger', execution.trigger_type);
-    display.keyValue('Started', display.formatDate(execution.started_at));
-    display.keyValue('Completed', display.formatDate(execution.completed_at));
+    display.keyValue('ID', execId);
+    display.keyValue('Workflow ID', execWorkflowId);
+    display.keyValue('Status', display.formatStatus(execStatus));
+    display.keyValue('Trigger', execTrigger);
+    display.keyValue('Started', display.formatDate(execStarted));
+    display.keyValue('Completed', display.formatDate(execCompleted));
 
-    if (execution.current_step !== undefined) {
-      display.keyValue('Current Step', String(execution.current_step + 1));
+    if (execCurrentStep !== undefined) {
+      display.keyValue('Current Step', String(execCurrentStep + 1));
     }
 
-    if (execution.error) {
+    if (execError) {
       display.subheader('Error');
-      console.log(chalk.red(execution.error));
+      console.log(chalk.red(String(execError)));
     }
 
-    if (execution.step_results && execution.step_results.length > 0) {
+    if (execSteps && execSteps.length > 0) {
       display.subheader('Step Results');
-      execution.step_results.forEach((result, index) => {
+      execSteps.forEach((result, index) => {
+        const resultStatus = String(result.status || 'pending');
+        const resultError = result.error_message || result.error;
+        const stepName = String(result.name || `Step ${index + 1}`);
         const statusIcon =
-          result.status === 'completed'
+          resultStatus === 'completed'
             ? chalk.green('✓')
-            : result.status === 'failed'
+            : resultStatus === 'failed'
               ? chalk.red('✗')
-              : result.status === 'running'
+              : resultStatus === 'running'
                 ? chalk.blue('●')
-                : chalk.dim('○');
+                : resultStatus === 'waiting_approval'
+                  ? chalk.yellow('⏸')
+                  : chalk.dim('○');
 
-        console.log(`  ${statusIcon} Step ${index + 1}: ${result.status}`);
-        if (result.error) {
-          console.log(`     ${chalk.red(result.error)}`);
+        console.log(`  ${statusIcon} ${stepName}: ${resultStatus}`);
+        if (resultError) {
+          console.log(`     ${chalk.dim(String(resultError))}`);
         }
       });
     }
@@ -295,6 +328,344 @@ async function cancelExecution(executionId: string): Promise<void> {
     display.keyValue('Status', display.formatStatus(execution.status));
   } catch (error) {
     spinner.fail('Failed to cancel execution');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Create workflow
+ */
+async function createWorkflow(options: {
+  name?: string;
+  description?: string;
+  agent?: string;
+  scheduleType?: string;
+  status?: string;
+  json?: boolean;
+}): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  // Get name if not provided
+  const name =
+    options.name ||
+    (await prompts.text({
+      message: 'Workflow name:',
+      required: true,
+    }));
+
+  // Get description if not provided
+  const description =
+    options.description ||
+    (await prompts.text({
+      message: 'Description (optional):',
+      required: false,
+    }));
+
+  // Workflows require at least one step - get initial agent
+  let agentId = options.agent;
+  if (!agentId) {
+    // List agents and let user select
+    spinner.start('Loading agents...');
+    const agents = await api.listAgents(bucketSlug);
+    spinner.stop();
+
+    if (agents.length === 0) {
+      display.error('No agents found. Workflows require at least one step.');
+      display.info(`Create an agent first: ${chalk.cyan('cosmic agents create')}`);
+      process.exit(1);
+    }
+
+    const agentChoices = agents.map((agent) => ({
+      name: agent.id,
+      message: `${agent.emoji || '🤖'} ${agent.agent_name} (${agent.agent_type})`,
+    }));
+
+    agentId = await prompts.select({
+      message: 'Select initial agent for the workflow:',
+      choices: agentChoices,
+    });
+  }
+
+  try {
+    // Fetch the agent
+    spinner.start('Loading agent...');
+    const agent = await api.getAgent(bucketSlug, agentId);
+    spinner.stop();
+
+    // Convert agent to step (step_number 1 for initial step)
+    const initialStep = agentToWorkflowStep(agent, 1);
+
+    spinner.start('Creating workflow...');
+
+    const data: api.CreateWorkflowData = {
+      workflow_name: name,
+      description: description || undefined,
+      steps: [initialStep],
+      schedule_type: (options.scheduleType as 'manual' | 'cron' | 'event_triggered') || 'manual',
+      status: (options.status as 'active' | 'draft' | 'paused') || 'draft',
+    };
+
+    const workflow = await api.createWorkflow(bucketSlug, data);
+
+    // Handle different response formats - the API might return the workflow directly or nested
+    const workflowData = workflow as Record<string, unknown>;
+    const workflowName = workflowData.workflow_name || workflowData.name || name;
+    const workflowId = workflowData.id || workflowData._id || '';
+    const workflowStatus = (workflowData.status as string) || 'draft';
+    const workflowSchedule = (workflowData.schedule_type as string) || 'manual';
+
+    spinner.succeed(`Created workflow: ${chalk.cyan(workflowName)}`);
+
+    if (options.json) {
+      display.json(workflow);
+      return;
+    }
+
+    display.keyValue('ID', workflowId || '-');
+    display.keyValue('Status', display.formatStatus(workflowStatus));
+    display.keyValue('Schedule', workflowSchedule);
+
+    display.newline();
+    display.subheader('Steps (1)');
+    console.log(`  ${chalk.dim('1.')} ${agent.emoji || '🤖'} ${chalk.cyan(agent.agent_name)} (${agent.agent_type})`);
+
+    display.newline();
+    if (workflowId) {
+      display.info(`Add more agents with: ${chalk.cyan(`cosmic workflows add-step ${workflowId} --agent <agent-id>`)}`);
+    }
+  } catch (error) {
+    spinner.fail('Failed to create workflow');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Convert agent to workflow step format
+ * Matches the dashboard's AddToWorkflowModal agentToStep function
+ */
+function agentToWorkflowStep(agent: Agent, stepNumber: number): Record<string, unknown> {
+  const step: Record<string, unknown> = {
+    step_number: stepNumber,
+    type: 'agent',
+    name: agent.agent_name,
+    agent_type: agent.agent_type,
+    config: {
+      emoji: agent.emoji,
+      prompt: agent.prompt,
+      model: agent.model,
+      context: agent.context,
+      email_notifications: agent.email_notifications,
+      require_approval: agent.require_approval,
+    },
+    wait_for_completion: true,
+  };
+
+  // Add repository-specific fields to config
+  if (agent.agent_type === 'repository') {
+    (step.config as Record<string, unknown>).repository_id = agent.repository_id;
+    (step.config as Record<string, unknown>).base_branch = agent.base_branch;
+  }
+
+  // Add computer_use-specific fields to config
+  if (agent.agent_type === 'computer_use') {
+    (step.config as Record<string, unknown>).start_url = agent.start_url;
+    (step.config as Record<string, unknown>).goal = agent.goal;
+  }
+
+  return step;
+}
+
+/**
+ * Add an agent as a step to a workflow
+ */
+async function addStepToWorkflow(
+  workflowId: string,
+  options: {
+    agent?: string;
+    json?: boolean;
+  }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  // Get agent ID if not provided
+  let agentId = options.agent;
+  if (!agentId) {
+    // List agents and let user select
+    spinner.start('Loading agents...');
+    const agents = await api.listAgents(bucketSlug);
+    spinner.stop();
+
+    if (agents.length === 0) {
+      display.error('No agents found');
+      display.info(`Create an agent first: ${chalk.cyan('cosmic agents create')}`);
+      process.exit(1);
+    }
+
+    const agentChoices = agents.map((agent) => ({
+      name: agent.id,
+      message: `${agent.emoji || '🤖'} ${agent.agent_name} (${agent.agent_type})`,
+    }));
+
+    agentId = await prompts.select({
+      message: 'Select agent to add:',
+      choices: agentChoices,
+    });
+  }
+
+  try {
+    // Fetch the agent
+    spinner.start('Loading agent...');
+    const agent = await api.getAgent(bucketSlug, agentId);
+    spinner.stop();
+
+    // Fetch the workflow
+    spinner.start('Loading workflow...');
+    const workflow = await api.getWorkflow(bucketSlug, workflowId);
+    spinner.stop();
+
+    // Handle potentially missing steps array
+    const existingSteps = workflow.steps || [];
+
+    // Convert agent to step format
+    const newStep = agentToWorkflowStep(agent, existingSteps.length + 1);
+
+    // Update workflow with new step
+    spinner.start('Adding step to workflow...');
+    const updatedWorkflow = await api.updateWorkflow(bucketSlug, workflowId, {
+      steps: [...existingSteps, newStep],
+    });
+    const updatedSteps = updatedWorkflow.steps || [];
+    spinner.succeed(`Added ${chalk.cyan(agent.agent_name)} as step ${updatedSteps.length}`);
+
+    if (options.json) {
+      display.json(updatedWorkflow);
+      return;
+    }
+
+    display.newline();
+    display.subheader(`Steps (${updatedSteps.length})`);
+    updatedSteps.forEach((step, index) => {
+      const stepAny = step as Record<string, unknown>;
+      const config = stepAny.config as Record<string, unknown> | undefined;
+      const stepName = stepAny.name || stepAny.agent_name || 'Unnamed';
+      const stepEmoji = config?.emoji || stepAny.emoji || '🤖';
+      const marker = index === updatedSteps.length - 1 ? chalk.green('→') : ' ';
+      console.log(
+        `  ${marker} ${chalk.dim(String(index + 1) + '.')} ${stepEmoji} ${chalk.cyan(stepName)} (${step.agent_type})`
+      );
+    });
+
+    display.newline();
+    display.info(`View workflow: ${chalk.cyan(`cosmic workflows get ${workflowId}`)}`);
+  } catch (error) {
+    spinner.fail('Failed to add step');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Remove a step from a workflow
+ */
+async function removeStepFromWorkflow(
+  workflowId: string,
+  options: {
+    step?: string;
+    force?: boolean;
+    json?: boolean;
+  }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  try {
+    // Fetch the workflow
+    spinner.start('Loading workflow...');
+    const workflow = await api.getWorkflow(bucketSlug, workflowId);
+    spinner.stop();
+
+    if (workflow.steps.length === 0) {
+      display.error('Workflow has no steps to remove');
+      process.exit(1);
+    }
+
+    // Get step number if not provided
+    let stepNumber: number;
+    if (options.step) {
+      stepNumber = parseInt(options.step, 10);
+    } else {
+      // Show steps and let user select
+      display.subheader('Current Steps');
+      workflow.steps.forEach((step, index) => {
+        const stepAny = step as Record<string, unknown>;
+        const config = stepAny.config as Record<string, unknown> | undefined;
+        const stepName = stepAny.name || stepAny.agent_name || 'Unnamed';
+        const stepEmoji = config?.emoji || stepAny.emoji || '🤖';
+        console.log(
+          `  ${chalk.dim(String(index + 1) + '.')} ${stepEmoji} ${chalk.cyan(stepName)} (${step.agent_type})`
+        );
+      });
+      display.newline();
+
+      const stepStr = await prompts.text({
+        message: 'Step number to remove:',
+        required: true,
+      });
+      stepNumber = parseInt(stepStr, 10);
+    }
+
+    // Validate step number
+    if (stepNumber < 1 || stepNumber > workflow.steps.length) {
+      display.error(`Invalid step number. Must be between 1 and ${workflow.steps.length}`);
+      process.exit(1);
+    }
+
+    const stepToRemove = workflow.steps[stepNumber - 1];
+
+    // Confirm deletion
+    if (!options.force) {
+      const confirmed = await prompts.confirm({
+        message: `Remove step ${stepNumber} (${stepToRemove.agent_name})?`,
+      });
+
+      if (!confirmed) {
+        display.info('Cancelled');
+        return;
+      }
+    }
+
+    // Remove the step
+    const newSteps = workflow.steps.filter((_, index) => index !== stepNumber - 1);
+
+    spinner.start('Removing step...');
+    const updatedWorkflow = await api.updateWorkflow(bucketSlug, workflowId, {
+      steps: newSteps,
+    });
+    spinner.succeed(`Removed step ${stepNumber} (${stepToRemove.agent_name})`);
+
+    if (options.json) {
+      display.json(updatedWorkflow);
+      return;
+    }
+
+    if (updatedWorkflow.steps.length > 0) {
+      display.newline();
+      display.subheader(`Remaining Steps (${updatedWorkflow.steps.length})`);
+      updatedWorkflow.steps.forEach((step, index) => {
+        const stepAny = step as Record<string, unknown>;
+        const config = stepAny.config as Record<string, unknown> | undefined;
+        const stepName = stepAny.name || stepAny.agent_name || 'Unnamed';
+        const stepEmoji = config?.emoji || stepAny.emoji || '🤖';
+        console.log(
+          `  ${chalk.dim(String(index + 1) + '.')} ${stepEmoji} ${chalk.cyan(stepName)} (${step.agent_type})`
+        );
+      });
+    } else {
+      display.info('Workflow now has no steps');
+    }
+  } catch (error) {
+    spinner.fail('Failed to remove step');
     display.error((error as Error).message);
     process.exit(1);
   }
@@ -356,6 +727,33 @@ export function createWorkflowsCommands(program: Command): void {
     .description('Get workflow details')
     .option('--json', 'Output as JSON')
     .action(getWorkflow);
+
+  workflowsCmd
+    .command('create')
+    .alias('add')
+    .description('Create a new workflow (requires at least one agent as initial step)')
+    .option('-n, --name <name>', 'Workflow name')
+    .option('-d, --description <description>', 'Workflow description')
+    .option('-a, --agent <agentId>', 'Initial agent ID for the first step')
+    .option('--schedule-type <type>', 'Schedule type (manual, cron, event_triggered)', 'manual')
+    .option('--status <status>', 'Initial status (draft, active, paused)', 'draft')
+    .option('--json', 'Output as JSON')
+    .action(createWorkflow);
+
+  workflowsCmd
+    .command('add-step <workflowId>')
+    .description('Add an agent as a step to a workflow')
+    .option('-a, --agent <agentId>', 'Agent ID to add as step')
+    .option('--json', 'Output as JSON')
+    .action(addStepToWorkflow);
+
+  workflowsCmd
+    .command('remove-step <workflowId>')
+    .description('Remove a step from a workflow')
+    .option('-s, --step <stepNumber>', 'Step number to remove (1-based)')
+    .option('-f, --force', 'Skip confirmation')
+    .option('--json', 'Output as JSON')
+    .action(removeStepFromWorkflow);
 
   workflowsCmd
     .command('run <id>')

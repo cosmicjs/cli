@@ -1987,13 +1987,12 @@ export async function startChat(options: ChatOptions): Promise<void> {
   isContentMode = options.contentMode || false;
 
   // Set ask mode flag - defaults to true (read-only mode)
-  // Agent mode is enabled with --agent flag or when using --build/--content
-  // For repo mode: defaults to agent mode unless --ask flag is explicitly provided
+  // Build, content, and repo modes disable ask mode to allow actions
   if (options.askMode === true) {
     // Explicit ask mode (e.g., cosmic update --ask)
     isAskMode = true;
   } else if (isBuildMode || isContentMode || isRepoMode) {
-    // Build, content, and repo modes default to agent mode
+    // Build, content, and repo modes allow actions
     isAskMode = false;
   } else {
     // Default chat mode is ask mode (read-only)
@@ -2288,7 +2287,7 @@ export async function startChat(options: ChatOptions): Promise<void> {
           console.log(chalk.bold('Current Configuration:'));
           console.log(chalk.dim(`  Bucket: ${formatContext()}`));
           console.log(chalk.dim(`  Model: ${model}`));
-          console.log(chalk.dim(`  Mode: ${isAskMode ? 'Ask (read-only)' : isContentMode ? 'Content' : isRepoMode ? 'Repository' : isBuildMode ? 'Build' : 'Agent'}`));
+          console.log(chalk.dim(`  Mode: ${isAskMode ? 'Ask (read-only)' : isContentMode ? 'Content' : isRepoMode ? 'Repository' : 'Build'}`));
 
           // Show chat context details
           if (chatContext.objectTypes?.length || chatContext.links?.length || chatContext.objectsLimit || chatContext.objectsDepth) {
@@ -2524,8 +2523,8 @@ In this mode:
 - Provide code examples, documentation references, and helpful guidance
 - Discuss the user's content strategy, architecture decisions, or implementation approaches
 
-If the user wants to create, update, or delete content, explain that they need to use "agent mode" by restarting with:
-  cosmic chat --agent
+If the user wants to create, update, or delete content, explain that they need to use content mode by restarting with:
+  cosmic chat --content
 
 Or use the shortcut commands:
   cosmic content  - Create and manage content
@@ -4560,11 +4559,17 @@ async function processMessage(
           }
         }
       } else {
-        // Use streaming for regular chat
+        // Content mode and Ask mode: Use streaming dashboard chat
         // Convert messages to the format expected by streamingChat
-        const dashboardMessages = conversationHistory.map((msg) => ({
+        // Include the system prompt prepended to the first user message
+        const dashboardMessages = conversationHistory.map((msg, index) => ({
           role: msg.role as 'user' | 'assistant',
-          content: [{ type: 'text' as const, text: msg.content }],
+          content: [{
+            type: 'text' as const,
+            text: index === 0 && msg.role === 'user'
+              ? systemPrompt + '\n\n' + msg.content
+              : msg.content
+          }],
         }));
 
         let fullText = '';
@@ -4603,6 +4608,7 @@ async function processMessage(
           },
         } : undefined;
 
+        // Use 'content-model' as the view_mode for content/ask modes
         const result = await api.streamingChat({
           messages: dashboardMessages,
           bucketSlug,
@@ -4614,7 +4620,7 @@ async function processMessage(
           media: pendingMediaIds.length > 0 ? pendingMediaIds : undefined,
           contextConfig,
           metadata: {
-            chat_mode: isAskMode ? 'ask' : isContentMode ? 'content' : 'agent',
+            chat_mode: isAskMode ? 'ask' : 'content',
           },
           onChunk: (chunk) => {
             fullText += chunk;
@@ -5246,12 +5252,9 @@ function printWelcomeScreen(model: string): void {
   } else if (isContentMode) {
     modeText = isAskMode ? 'Content Mode (Ask)' : 'Content Mode';
     modeColor = isAskMode ? chalk.blue : chalk.yellow;
-  } else if (isAskMode) {
+  } else {
     modeText = 'Ask Mode (read-only)';
     modeColor = chalk.blue;
-  } else {
-    modeText = 'Agent Mode';
-    modeColor = chalk.yellow;
   }
 
   // Get user name
@@ -5441,24 +5444,20 @@ function printHelp(): void {
     console.log();
     console.log(chalk.dim('  Actions require confirmation before executing.'));
   } else {
-    console.log(chalk.bold('Current Mode: ') + chalk.yellow('Agent Mode'));
-    console.log(chalk.dim('  The AI can create, update, and delete content.'));
+    console.log(chalk.bold('Current Mode: ') + chalk.blue('Ask Mode (read-only)'));
+    console.log(chalk.dim('  Ask questions about your content and get AI-powered answers.'));
     console.log();
-    console.log(chalk.bold('Example prompts:'));
-    console.log(chalk.dim('  "List all authors"'));
-    console.log(chalk.dim('  "Create a new post titled Hello World"'));
-    console.log(chalk.dim('  "Add an author named John Doe"'));
-    console.log(chalk.dim('  "Show me the posts"'));
-    console.log(chalk.dim('  "Write a blog post about AI and save it"'));
-    console.log();
-    console.log(chalk.dim('  Actions require confirmation before executing.'));
+    console.log(chalk.bold('Example questions:'));
+    console.log(chalk.dim('  "What object types are available?"'));
+    console.log(chalk.dim('  "How do I structure a blog with categories?"'));
+    console.log(chalk.dim('  "Explain how metafields work"'));
+    console.log(chalk.dim('  "What is the best way to model products?"'));
   }
 
   console.log();
   console.log(chalk.bold('Mode Shortcuts:'));
   console.log(chalk.dim('  cosmic chat') + '             - Ask mode (read-only questions)');
   console.log(chalk.dim('  cosmic chat --content') + '   - Content mode (create/update content)');
-  console.log(chalk.dim('  cosmic chat --agent') + '     - Agent mode (full actions)');
   console.log(chalk.dim('  cosmic chat --build') + '     - Build a new app');
   console.log(chalk.dim('  cosmic chat --repo') + '      - Update existing code');
   console.log();

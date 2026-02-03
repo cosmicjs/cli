@@ -98,11 +98,14 @@ cosmic media delete <id>             # Delete media
 ### Workflows
 
 ```bash
-cosmic workflows list                # List workflows
-cosmic workflows get <id>            # Get workflow details
-cosmic workflows run <id>            # Execute workflow
-cosmic workflows executions          # List executions
-cosmic workflows cancel <id>         # Cancel execution
+cosmic workflows list                      # List workflows
+cosmic workflows get <id>                  # Get workflow details
+cosmic workflows create --agent <agentId>  # Create workflow with initial agent
+cosmic workflows add-step <id> --agent <agentId>  # Add agent as step
+cosmic workflows remove-step <id> --step 2        # Remove step by number
+cosmic workflows run <id>                  # Execute workflow
+cosmic workflows executions                # List executions
+cosmic workflows cancel <id>               # Cancel execution
 ```
 
 ### Agents

@@ -70,11 +70,10 @@ program
   .command('chat')
   .description('Start interactive AI chat (defaults to ask mode - read-only questions)')
   .option('-m, --model <model>', 'AI model to use')
-  .option('-a, --agent', 'Enable agent mode (can execute actions like create, update, delete)')
   .option('--ask', 'Ask mode - read-only questions, no changes')
   .option('-c, --content', 'Start in content mode (create/update content with AI)')
-  .option('-b, --build', 'Start in app building mode (implies --agent)')
-  .option('-r, --repo [name]', 'Start in repository update mode (implies --agent)')
+  .option('-b, --build', 'Start in app building mode')
+  .option('-r, --repo [name]', 'Start in repository update mode')
   .option('--branch <branch>', 'Branch to use in repo mode (default: main)')
   .option('-p, --prompt <prompt>', 'Start with an initial prompt')
   .option('-t, --types <types>', 'Object type slugs to include as context (comma-separated)')
@@ -114,7 +113,7 @@ program
       repoMode: !!options.repo,
       repoName: typeof options.repo === 'string' ? options.repo : undefined,
       repoBranch: options.branch,
-      askMode: options.ask || (!options.agent && !options.build && !options.content && !options.repo), // Explicit --ask or default when no mode flags
+      askMode: options.ask || (!options.build && !options.content && !options.repo), // Explicit --ask or default when no mode flags
       context: Object.keys(context).length > 0 ? context : undefined,
     });
   });
