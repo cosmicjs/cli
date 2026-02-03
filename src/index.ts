@@ -36,6 +36,7 @@ import { createAgentsCommands } from './commands/agents.js';
 import { createReposCommands } from './commands/repos.js';
 import { createDeployCommands } from './commands/deploy.js';
 import { createAICommands } from './commands/ai.js';
+import { createShellCommand } from './commands/shell.js';
 import { startChat } from './chat/repl.js';
 import { isAuthenticated } from './config/store.js';
 import { formatContext, getContextInfo } from './config/context.js';
@@ -64,6 +65,7 @@ createAgentsCommands(program);
 createReposCommands(program);
 createDeployCommands(program);
 createAICommands(program);
+createShellCommand(program);
 
 // Add chat command (interactive mode)
 program
@@ -253,6 +255,7 @@ program.action(async () => {
 
     // Show available commands
     console.log(chalk.dim('Available commands:'));
+    console.log(`  ${chalk.cyan('cosmic shell')}      ${chalk.bold('Interactive shell')} (no "cosmic" prefix needed)`);
     console.log(`  ${chalk.cyan('cosmic chat')}       Start interactive AI chat mode`);
     console.log(`  ${chalk.cyan('cosmic content')}    ${chalk.yellow('Create/manage content with AI')}`);
     console.log(`  ${chalk.cyan('cosmic build')}      ${chalk.green('Build an app with AI')} (creates repo & deploys)`);

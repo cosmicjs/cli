@@ -4,6 +4,7 @@ AI-powered command-line interface for [Cosmic CMS](https://www.cosmicjs.com). Ma
 
 ## Features
 
+- **Interactive Shell** - Run commands without the `cosmic` prefix
 - **AI-Powered Chat Mode** - Interact with your content using natural language
 - **Shortcut Commands** - `content`, `build`, and `update` for common AI workflows
 - **Direct Commands** - Full CRUD for objects, media, repos, workflows, and agents
@@ -35,10 +36,11 @@ cosmic login
 # Set your working context (interactive selection)
 cosmic use
 
-# Start interactive chat mode
-cosmic chat
+# Start interactive shell (no "cosmic" prefix needed)
+cosmic shell
 
-# Or use shortcut commands
+# Or run individual commands
+cosmic chat                 # Start AI chat mode
 cosmic content              # Create/manage content with AI
 cosmic build                # Build a new app with AI
 cosmic update my-repo       # Update existing code with AI
@@ -63,6 +65,34 @@ For quick bucket-level access without logging in:
 ```bash
 cosmic use --bucket=my-bucket --read-key=your-read-key --write-key=your-write-key
 ```
+
+## Interactive Shell
+
+Start an interactive shell where you can run commands without typing `cosmic` each time:
+
+```bash
+cosmic shell
+
+  Cosmic Shell v1.0.0
+  Logged in as: you@example.com
+
+cosmic default> ls
+cosmic default> cd my-project
+cosmic my-project> objects list
+cosmic my-project> !git status    # Use ! prefix for system commands
+cosmic my-project> exit
+```
+
+### Shell Features
+
+- No `cosmic` prefix needed for commands
+- `!` prefix runs system shell commands (`!ls`, `!git status`)
+- Prompt shows current workspace/bucket context
+- Command history with arrow keys
+- `help` shows available commands
+- `exit` or `quit` to leave
+
+**Alias:** `cosmic sh`
 
 ## Core Commands
 
@@ -297,16 +327,38 @@ cosmic ai generate --model=gpt-5 "Your prompt"
 
 ## Examples
 
-### Build and Deploy an App
+### Build and Deploy an App (Full Walkthrough)
 
 ```bash
-# Build a new app
-cosmic build -p "A recipe blog with categories and search"
+# 1. Login to Cosmic
+cosmic login
 
-# Connect the generated repo
-cosmic repos connect --url https://github.com/myuser/recipe-blog
+# 2. Create a new project with AI-generated content
+cosmic projects create
+# Follow prompts: name your project, choose "Use AI to generate content model"
+# Describe: "A recipe blog with recipes, categories, and authors"
 
-# Deploy to Vercel
+# 3. Generate more content with AI
+cosmic content -p "Create 5 recipes with images across different categories"
+
+# 4. Build an app from your content
+cosmic build -p "A modern recipe blog with search and category filtering"
+# AI generates a complete Next.js app and creates a GitHub repo
+
+# 5. Deploy to Vercel
+cosmic repos list                              # Find your repo ID
+cosmic deploy start <repoId> --watch           # Deploy and watch progress
+# ✓ Deployment ready: https://recipe-blog-abc123.vercel.app
+
+# 6. Make updates to the app
+cosmic update <repoName> -p "Add a favorites feature and dark mode"
+# AI makes changes to the code
+
+# 7. Create a PR for the changes
+cosmic agents pr <agentId>
+# ✓ PR URL: https://github.com/user/recipe-blog/pull/1
+
+# 8. Deploy the updates
 cosmic deploy start <repoId> --watch
 ```
 

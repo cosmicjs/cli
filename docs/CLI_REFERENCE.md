@@ -4,6 +4,7 @@ Complete command reference for the Cosmic CLI. For a quick overview, see the [RE
 
 ## Table of Contents
 
+- [Interactive Shell](#interactive-shell)
 - [Global Options](#global-options)
 - [Authentication](#authentication)
 - [Context & Navigation](#context--navigation)
@@ -18,6 +19,97 @@ Complete command reference for the Cosmic CLI. For a quick overview, see the [RE
 - [Shortcut Commands](#shortcut-commands)
 - [Configuration](#configuration)
 - [Command Aliases](#command-aliases)
+
+---
+
+## Interactive Shell
+
+### `cosmic shell`
+
+Start an interactive shell session where you can run commands without the `cosmic` prefix.
+
+```bash
+cosmic shell
+```
+
+**Alias:** `cosmic sh`
+
+#### Shell Session Example
+
+```
+$ cosmic shell
+
+  Cosmic Shell v1.0.0
+  Logged in as: you@example.com
+  Context: my-workspace / my-project / production
+
+  Type commands without "cosmic" prefix. Use "!" for system shell.
+  Type "help" for commands, "exit" to quit.
+
+cosmic my-workspace/production> ls
+cosmic my-workspace/production> objects list
+cosmic my-workspace/production> cd posts
+cosmic my-workspace/production> !git status
+cosmic my-workspace/production> exit
+Goodbye!
+$
+```
+
+#### Shell Features
+
+| Feature | Description |
+|---------|-------------|
+| No prefix needed | Type `ls` instead of `cosmic ls` |
+| System commands | Use `!` prefix for shell commands (`!ls`, `!git status`, etc.) |
+| Dynamic prompt | Shows current workspace/bucket context |
+| Command history | Use arrow keys to navigate command history |
+| Context updates | Prompt updates when context changes (after `cd`, `use`, etc.) |
+
+#### Shell Commands
+
+| Command | Description |
+|---------|-------------|
+| `help` | Show available commands |
+| `exit`, `quit` | Exit the shell |
+| `!<command>` | Run system shell command |
+
+#### Navigation Commands (in shell)
+
+```bash
+ls                    # List contents at current level
+cd <path>             # Navigate to project/bucket/type
+pwd                   # Show current location
+use [workspace]       # Set workspace (or "-" for default)
+context               # Show current context
+```
+
+#### Content Commands (in shell)
+
+```bash
+objects list          # List objects
+objects get <id>      # Get object details
+objects types         # List object types
+media list            # List media files
+```
+
+#### AI Commands (in shell)
+
+```bash
+chat                  # Start AI chat
+content               # Content mode chat
+build                 # Build mode chat
+update [repo]         # Update repo mode chat
+ai generate <prompt>  # Generate text
+ai image <prompt>     # Generate image
+```
+
+#### Other Commands (in shell)
+
+```bash
+agents list           # List agents
+workflows list        # List workflows
+repos list            # List repositories
+```
 
 ---
 
@@ -1005,6 +1097,7 @@ Many commands have short aliases for convenience:
 
 | Command | Aliases |
 |---------|---------|
+| `shell` | `sh` |
 | `list` | `ls` |
 | `delete` | `rm` |
 | `create` | `add` |
@@ -1026,23 +1119,58 @@ Many commands have short aliases for convenience:
 
 ## Examples
 
-### Complete App Workflow
+### Complete App Workflow (Full Walkthrough)
 
 ```bash
-# 1. Build an app
-cosmic build -p "A recipe blog with categories and search"
+# 1. Login to Cosmic
+cosmic login
 
-# 2. Connect the generated repo
-cosmic repos connect --url https://github.com/myuser/recipe-blog
+# 2. Create a new project with AI-generated content model
+cosmic projects create
+# Follow prompts:
+#   - Project title: "Recipe Blog"
+#   - How to start: "Use AI to generate content model"
+#   - Describe: "A recipe blog with recipes, categories, and authors"
+# AI creates object types and sample content automatically
 
-# 3. Deploy to Vercel
-cosmic deploy start <repoId> --watch
+# 3. Verify your content
+cosmic ls                              # See your project
+cosmic cd <project-id>                 # Navigate into it
+cosmic ls                              # See the bucket
+cosmic cd <bucket-slug>                # Navigate into bucket
+cosmic objects list                    # See generated content
 
-# 4. Later, update the app
-cosmic update recipe-blog -p "Add a favorites feature"
+# 4. Generate more content with AI
+cosmic content -p "Create 10 more recipes with hero images"
 
-# 5. Create PR for the changes
+# 5. Build an app from your content
+cosmic build -p "A modern recipe blog using Next.js with search, 
+category filtering, and a beautiful grid layout"
+# AI generates complete app code and creates GitHub repo
+
+# 6. List your repos and deploy
+cosmic repos list                      # Find repo ID
+cosmic deploy start <repoId> --watch   # Deploy to Vercel
+# ✓ Deployment ready: https://recipe-blog-xyz.vercel.app
+
+# 7. Open your app and review it
+# Visit the deployment URL in your browser
+
+# 8. Make updates to the app
+cosmic update <repoName> -p "Add a favorites feature where users can 
+save recipes to localStorage, and add dark mode support"
+# AI modifies the code in your repo
+
+# 9. Watch the agent work
+cosmic agents executions <agentId> --watch
+
+# 10. Review and create a PR
 cosmic agents pr <agentId>
+# ✓ PR created: https://github.com/user/recipe-blog/pull/1
+
+# 11. Merge and redeploy
+# After reviewing/merging the PR:
+cosmic deploy start <repoId> --watch
 ```
 
 ### Automated Content Pipeline

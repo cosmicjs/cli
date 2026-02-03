@@ -40,7 +40,7 @@ async function signup(): Promise<void> {
   display.info(`Opening ${chalk.cyan(SIGNUP_URL)} in your browser...`);
   display.newline();
   display.info(`After signing up, run ${chalk.cyan('cosmic login')} to authenticate.`);
-  
+
   await open(SIGNUP_URL);
 }
 
@@ -59,11 +59,14 @@ async function verify(verificationCode?: string): Promise<void> {
   try {
     spinner.start('Verifying email...');
     const result = await authVerifyEmail(code);
-    spinner.succeed(`Email verified! Logged in as ${chalk.cyan(result.user.email)}`);
+    spinner.succeed(`Logged in as ${chalk.cyan(result.user.email)}`);
 
     display.newline();
     display.info(
-      `Run ${chalk.cyan('cosmic use <workspace>/<project>/<bucket>')} to set your working context.`
+      `You are in the default workspace. Use ${chalk.cyan('cosmic ls')} to see what's here.`
+    );
+    display.info(
+      `Run ${chalk.cyan('cosmic use')} to switch workspaces, then ${chalk.cyan('cosmic cd')} to navigate.`
     );
   } catch (error) {
     spinner.fail('Email verification failed');
@@ -140,26 +143,29 @@ async function login(options: { email?: string; password?: string }): Promise<vo
   try {
     spinner.start('Authenticating...');
     let result = await authenticateWithPassword(email, password);
-    
+
     // Handle 2FA if required
     if (result.requires2FA) {
       spinner.stop();
       display.info('Two-factor authentication required');
-      
+
       const otp = await prompts.text({
         message: 'Enter your 2FA code:',
         required: true,
       });
-      
+
       spinner.start('Verifying 2FA...');
       result = await authenticateWithPassword(email, password, otp);
     }
-    
+
     spinner.succeed(`Logged in as ${chalk.cyan(result.user.email)}`);
 
     display.newline();
     display.info(
-      `Run ${chalk.cyan('cosmic use <workspace>/<project>/<bucket>')} to set your working context.`
+      `You are in the default workspace. Use ${chalk.cyan('cosmic ls')} to see what's here.`
+    );
+    display.info(
+      `Run ${chalk.cyan('cosmic use')} to switch workspaces, then ${chalk.cyan('cosmic cd')} to navigate.`
     );
   } catch (error) {
     spinner.fail('Authentication failed');

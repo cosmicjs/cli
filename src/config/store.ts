@@ -6,6 +6,7 @@
 import Conf from 'conf';
 import { homedir } from 'os';
 import { join } from 'path';
+import { readFileSync, existsSync } from 'fs';
 import type { CosmicConfig, CosmicCredentials } from '../types.js';
 
 const CONFIG_DIR = join(homedir(), '.cosmic');
@@ -76,6 +77,35 @@ export function clearConfigValue(key: keyof CosmicConfig): void {
  */
 export function resetConfig(): void {
   configStore.clear();
+}
+
+/**
+ * Read fresh context values directly from config file (bypasses cache)
+ * Used by shell to get updated context after subprocess commands
+ */
+export function getFreshContext(): {
+  workspace?: string;
+  project?: string;
+  bucket?: string;
+} {
+  const configPath = join(CONFIG_DIR, 'config.json');
+  try {
+    if (existsSync(configPath)) {
+      const data = JSON.parse(readFileSync(configPath, 'utf-8'));
+      return {
+        workspace: data.currentWorkspace,
+        project: data.currentProject,
+        bucket: data.currentBucket,
+      };
+    }
+  } catch {
+    // Fall back to cached values on error
+  }
+  return {
+    workspace: configStore.get('currentWorkspace'),
+    project: configStore.get('currentProject'),
+    bucket: configStore.get('currentBucket'),
+  };
 }
 
 /**
@@ -289,6 +319,7 @@ export default {
   setConfig,
   clearConfigValue,
   resetConfig,
+  getFreshContext,
   getCredentials,
   getCredentialValue,
   setCredentials,

@@ -157,7 +157,7 @@ export function requireBucket(): string {
   const bucket = getCurrentBucketSlug();
   if (!bucket) {
     throw new Error(
-      'No bucket selected. Run `cosmic use <workspace>/<project>/<bucket>` to set context.'
+      'No bucket selected. Run `cosmic use` to set your workspace, then `cosmic cd` to navigate to a bucket.'
     );
   }
   return bucket;

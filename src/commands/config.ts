@@ -175,7 +175,7 @@ async function use(
 
     display.newline();
     display.info(
-      `Use ${chalk.cyan('cosmic use <workspace>/<project>/<bucket>')} to set context`
+      `Use ${chalk.cyan('cosmic use')} to set your workspace, then ${chalk.cyan('cosmic cd')} to navigate.`
     );
   } catch (error) {
     spinner.fail('Failed to load workspaces');

@@ -278,7 +278,7 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
       console.log(chalk.yellow(`  ⚠ Bucket "${bucketSlug}" not found.`));
       console.log(chalk.dim(`    This bucket may have been deleted or is no longer accessible.`));
       console.log();
-      console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
+      console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use')} to set your workspace, then ${chalk.bold('cosmic cd')} to navigate.`));
       console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
       console.log();
 
@@ -342,7 +342,7 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
       console.log(chalk.yellow(`  ⚠ Bucket "${bucketSlug}" not found.`));
       console.log(chalk.dim(`    This bucket may have been deleted or is no longer accessible.`));
       console.log();
-      console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
+      console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use')} to set your workspace, then ${chalk.bold('cosmic cd')} to navigate.`));
       console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
       console.log();
 
@@ -663,7 +663,7 @@ async function cd(path?: string): Promise<void> {
         console.log(chalk.yellow(`  ⚠ Bucket "${currentBucket}" not found.`));
         console.log(chalk.dim(`    This bucket may have been deleted or is no longer accessible.`));
         console.log();
-        console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
+        console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use')} to set your workspace, then ${chalk.bold('cosmic cd')} to navigate.`));
         console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
         console.log();
 
