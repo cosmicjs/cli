@@ -197,6 +197,14 @@ export interface StepResult {
 }
 
 // Agent types
+export interface AgentSchedule {
+  enabled: boolean;
+  type?: 'once' | 'recurring';
+  frequency?: 'hourly' | 'daily' | 'weekly' | 'monthly';
+  next_run_at?: string;
+  timezone?: string;
+}
+
 export interface Agent {
   id: string;
   agent_name: string;
@@ -209,6 +217,7 @@ export interface Agent {
   start_url?: string;
   goal?: string;
   context?: Record<string, unknown>;
+  schedule?: AgentSchedule;
   email_notifications?: boolean;
   require_approval?: boolean;
   created_at: string;

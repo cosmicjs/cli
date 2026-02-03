@@ -782,6 +782,13 @@ export interface CreateAgentData {
   start_url?: string;
   goal?: string;
   context?: Record<string, unknown>;
+  schedule?: {
+    enabled: boolean;
+    type?: 'once' | 'recurring';
+    frequency?: 'hourly' | 'daily' | 'weekly' | 'monthly';
+    next_run_at?: string;
+    timezone?: string;
+  };
   email_notifications?: boolean;
   require_approval?: boolean;
 }

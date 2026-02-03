@@ -49,15 +49,21 @@ async function listAgents(options: { json?: boolean }): Promise<void> {
     }
 
     const table = display.createTable({
-      head: ['ID', 'Name', 'Type', 'Model', 'Created'],
+      head: ['ID', 'Name', 'Type', 'Schedule', 'Created'],
     });
 
     for (const agent of agents) {
+      // Format schedule status
+      let scheduleStatus = '-';
+      if (agent.schedule?.enabled) {
+        scheduleStatus = agent.schedule.frequency || 'enabled';
+      }
+
       table.push([
         agent.id || '-',
         `${agent.emoji || '🤖'} ${display.truncate(agent.agent_name || '', 30)}`,
         agent.agent_type || '-',
-        agent.model || 'default',
+        scheduleStatus,
         display.formatDate(agent.created_at),
       ]);
     }
@@ -108,6 +114,18 @@ async function getAgent(
 
     display.keyValue('Email Notifications', agent.email_notifications ? 'Yes' : 'No');
     display.keyValue('Require Approval', agent.require_approval ? 'Yes' : 'No');
+
+    // Display schedule information
+    if (agent.schedule?.enabled) {
+      display.subheader('Schedule');
+      display.keyValue('Status', 'Enabled');
+      display.keyValue('Type', agent.schedule.type || 'recurring');
+      display.keyValue('Frequency', agent.schedule.frequency || '-');
+      display.keyValue('Timezone', agent.schedule.timezone || 'UTC');
+      if (agent.schedule.next_run_at) {
+        display.keyValue('Next Run', display.formatDate(agent.schedule.next_run_at));
+      }
+    }
 
     display.subheader('Prompt');
     console.log(agent.prompt);
@@ -213,6 +231,11 @@ async function createAgent(options: {
   links?: string;
   objectsLimit?: string;
   objectsDepth?: string;
+  // Schedule options
+  schedule?: boolean;
+  scheduleType?: 'once' | 'recurring';
+  scheduleFrequency?: 'hourly' | 'daily' | 'weekly' | 'monthly';
+  timezone?: string;
 }): Promise<void> {
   const bucketSlug = requireBucket();
   const agentType = normalizeAgentType(options.type);
@@ -296,6 +319,14 @@ async function createAgent(options: {
     // Use provided model or default based on agent type
     const model = options.model || getDefaultModelForAgentType(agentType);
 
+    // Build schedule config if schedule options are provided
+    const schedule = options.schedule ? {
+      enabled: true,
+      type: options.scheduleType || 'recurring',
+      frequency: options.scheduleFrequency || 'daily',
+      timezone: options.timezone || 'UTC',
+    } : undefined;
+
     const data: api.CreateAgentData = {
       agent_name: name,
       agent_type: agentType,
@@ -306,6 +337,7 @@ async function createAgent(options: {
       base_branch: baseBranch,
       start_url: options.startUrl,
       goal: options.goal,
+      schedule,
       email_notifications: options.emailNotifications,
       require_approval: options.requireApproval,
       context,
@@ -325,6 +357,11 @@ async function createAgent(options: {
     if (isRepository) {
       display.keyValue('Repository', repositoryId || '-');
       display.keyValue('Base Branch', baseBranch || '-');
+    }
+
+    if (schedule?.enabled) {
+      display.keyValue('Schedule', `${schedule.frequency} (${schedule.type})`);
+      display.keyValue('Timezone', schedule.timezone || 'UTC');
     }
 
     // Optionally run the agent immediately
@@ -856,6 +893,10 @@ export function createAgentsCommands(program: Command): void {
     .option('--objects-depth <n>', 'Object depth for nested metafields (default: 1)', '1')
     .option('--email-notifications', 'Enable email notifications')
     .option('--require-approval', 'Require approval before execution')
+    .option('--schedule', 'Enable scheduled runs')
+    .option('--schedule-type <type>', 'Schedule type: once or recurring (default: recurring)')
+    .option('--schedule-frequency <freq>', 'Run frequency: hourly, daily, weekly, monthly (default: daily)')
+    .option('--timezone <tz>', 'Timezone for schedule (default: UTC)')
     .option('--run', 'Run the agent immediately after creation')
     .option('--json', 'Output as JSON')
     .action(createAgent);
