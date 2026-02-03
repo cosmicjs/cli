@@ -8,6 +8,7 @@ import chalk from 'chalk';
 import {
   getConfig,
   setConfigValue,
+  clearConfigValue,
   getCurrentBucketSlug,
   getCurrentWorkspaceSlug,
   getCurrentWorkspaceId,
@@ -17,6 +18,7 @@ import {
   getConfigDir,
   setCredentials,
   getCredentials,
+  clearBucketCredentials,
   getApiUrl,
 } from '../config/store.js';
 import { authenticateWithBucketKeys } from '../auth/manager.js';
@@ -52,6 +54,7 @@ async function use(
     writeKey?: string;
     workspace?: string;
     project?: string;
+    default?: boolean;
   }
 ): Promise<void> {
   // If bucket keys are provided, use bucket key auth
@@ -62,7 +65,20 @@ async function use(
     return;
   }
 
-  // If context string is provided (workspace/project/bucket format)
+  // If --default flag or "-" is used, clear workspace to show default projects
+  if (options.default || contextString === '-') {
+    // Clear all context
+    setContext('', '', '', '', '');
+    clearConfigValue('currentObjectType');
+    clearBucketCredentials();
+    clearSDKClient();
+
+    display.success('Switched to default projects (no workspace)');
+    display.info(`Run ${chalk.cyan('cosmic ls')} to see your default projects.`);
+    return;
+  }
+
+  // If context string is provided (workspace/project/bucket format or just workspace)
   if (contextString) {
     const parts = contextString.split('/').filter(Boolean);
     const workspaceSlug = parts[0];
@@ -81,7 +97,26 @@ async function use(
       }
     }
 
-    setContext(workspaceSlug, projectSlug, bucket, workspaceId, undefined);
+    // When setting a workspace, explicitly clear project/bucket if not provided
+    // Use empty string to trigger clearing (undefined skips the clear)
+    setContext(
+      workspaceSlug,
+      projectSlug || '',  // Clear project if not provided
+      bucket || '',       // Clear bucket if not provided
+      workspaceId,
+      ''                  // Clear project ID
+    );
+
+    // Also clear the object type context
+    clearConfigValue('currentObjectType');
+
+    // Clear bucket from credentials if not setting a new bucket
+    // (getCurrentBucketSlug falls back to credentials.bucketSlug)
+    if (!bucket) {
+      clearBucketCredentials();
+      clearSDKClient();
+    }
+
     display.success(`Context set to ${formatContext()}`);
     return;
   }
@@ -98,7 +133,26 @@ async function use(
         process.exit(1);
       }
     }
-    setContext(options.workspace, options.project, options.bucket, workspaceId, undefined);
+
+    // When setting workspace only, clear project/bucket
+    // Use empty string to trigger clearing if not provided
+    setContext(
+      options.workspace,
+      options.project || '',
+      options.bucket || '',
+      workspaceId,
+      ''
+    );
+
+    // Also clear the object type context
+    clearConfigValue('currentObjectType');
+
+    // Clear bucket from credentials if not setting a new bucket
+    if (!options.bucket) {
+      clearBucketCredentials();
+      clearSDKClient();
+    }
+
     display.success(`Context set to ${formatContext()}`);
     return;
   }
@@ -438,12 +492,13 @@ async function keys(action?: string): Promise<void> {
 export function createConfigCommands(program: Command): void {
   program
     .command('use [context]')
-    .description('Set working context (workspace/project/bucket)')
+    .description('Set working context (workspace/project/bucket). Use "-" or --default for default projects.')
     .option('-b, --bucket <slug>', 'Bucket slug')
     .option('-r, --read-key <key>', 'Bucket read key')
     .option('-w, --write-key <key>', 'Bucket write key')
     .option('--workspace <slug>', 'Workspace slug')
     .option('--project <slug>', 'Project slug')
+    .option('-d, --default', 'Switch to default projects (no workspace)')
     .action(use);
 
   program

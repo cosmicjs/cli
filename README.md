@@ -32,8 +32,8 @@ bun add -g @cosmicjs/cli
 # Login to your Cosmic account
 cosmic login
 
-# Set your working context
-cosmic use my-workspace/my-project/my-bucket
+# Set your working context (interactive selection)
+cosmic use
 
 # Start interactive chat mode
 cosmic chat
@@ -70,7 +70,9 @@ cosmic use --bucket=my-bucket --read-key=your-read-key --write-key=your-write-ke
 
 ```bash
 # Set working context
-cosmic use <workspace>/<project>/<bucket>
+cosmic use                          # Interactive workspace selection
+cosmic use my-workspace             # Switch to a workspace
+cosmic use -                        # Switch to default projects (no workspace)
 cosmic context                      # Show current context
 
 # Navigate like a filesystem
@@ -88,7 +90,9 @@ cosmic pwd                          # Show current location
 cosmic objects list                          # List objects
 cosmic objects list --type=posts             # Filter by type
 cosmic objects list --status=draft           # Filter by status
+cosmic objects list --props "id,title,metadata"  # Select specific fields
 cosmic objects get <id>                      # Get object details
+cosmic objects get <id> --depth 2            # With nested references
 cosmic objects create --type=posts           # Create object (interactive)
 cosmic objects update <id> --title="New"     # Update object
 cosmic objects delete <id>                   # Delete object

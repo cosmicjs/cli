@@ -49,7 +49,7 @@ async function listMedia(options: {
 
     for (const file of media) {
       table.push([
-        chalk.dim(file.id.slice(0, 8)),
+        chalk.dim(file.id),
         display.truncate(file.name, 35),
         file.type || '-',
         file.size ? display.formatBytes(file.size) : '-',

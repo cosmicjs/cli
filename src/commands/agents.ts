@@ -474,7 +474,7 @@ async function listAgentExecutions(
 
     for (const exec of executions) {
       table.push([
-        chalk.dim(exec.id.slice(0, 8)),
+        chalk.dim(exec.id),
         display.formatStatus(exec.status),
         display.formatDate(exec.started_at),
         display.formatDate(exec.completed_at),

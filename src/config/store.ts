@@ -113,6 +113,16 @@ export function clearCredentials(): void {
 }
 
 /**
+ * Clear bucket-specific credentials (bucketSlug, readKey, writeKey)
+ * Preserves user auth (accessToken, refreshToken, etc.)
+ */
+export function clearBucketCredentials(): void {
+  credentialsStore.delete('bucketSlug');
+  credentialsStore.delete('readKey');
+  credentialsStore.delete('writeKey');
+}
+
+/**
  * Check if user is authenticated
  */
 export function isAuthenticated(): boolean {
@@ -283,6 +293,7 @@ export default {
   getCredentialValue,
   setCredentials,
   clearCredentials,
+  clearBucketCredentials,
   isAuthenticated,
   getApiUrl,
   getCurrentBucketSlug,

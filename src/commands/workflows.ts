@@ -219,8 +219,8 @@ async function listExecutions(options: {
 
     for (const exec of executions) {
       table.push([
-        chalk.dim(exec.id.slice(0, 8)),
-        chalk.dim(exec.workflow_id.slice(0, 8)),
+        chalk.dim(exec.id),
+        chalk.dim(exec.workflow_id),
         display.formatStatus(exec.status),
         exec.trigger_type,
         display.formatDate(exec.started_at),

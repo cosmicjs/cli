@@ -73,11 +73,18 @@ cosmic whoami
 
 ### `cosmic use`
 
-Set the working context (workspace, project, bucket).
+Set the working context (workspace, project, bucket). Runs interactively to let you select from available options.
 
 ```bash
-# Full path
-cosmic use <workspace>/<project>/<bucket>
+# Interactive selection
+cosmic use
+
+# Switch to a specific workspace
+cosmic use <workspace-slug>
+
+# Switch to default projects (no workspace)
+cosmic use -
+cosmic use --default
 
 # With bucket keys (no login required)
 cosmic use --bucket=<slug> --read-key=<key> --write-key=<key>
@@ -86,6 +93,7 @@ cosmic use --bucket=<slug> --read-key=<key> --write-key=<key>
 **Options:**
 | Option | Description |
 |--------|-------------|
+| `-d, --default` | Switch to default projects (no workspace) |
 | `--bucket <slug>` | Bucket slug |
 | `--read-key <key>` | Bucket read key |
 | `--write-key <key>` | Bucket write key |
@@ -167,14 +175,18 @@ List objects in current bucket.
 ```bash
 cosmic objects list
 cosmic objects ls                            # Alias
+cosmic objects list --props "id,title,type"  # Select specific fields
 ```
 
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--type <slug>` | Filter by object type |
-| `--status <status>` | Filter by status (`published`, `draft`) |
-| `--limit <n>` | Limit results |
+| `-t, --type <slug>` | Filter by object type |
+| `-s, --status <status>` | Filter by status (`published`, `draft`, `any`) |
+| `-l, --limit <n>` | Limit results (default: 10) |
+| `-p, --props <props>` | Properties to return (comma-separated, e.g. `"id,title,slug,metadata"`) |
+| `-d, --depth <n>` | Depth for nested object references |
+| `--skip <n>` | Skip results (for pagination) |
 | `--json` | Output as JSON |
 
 ### `cosmic objects get`
@@ -184,7 +196,15 @@ Get object details.
 ```bash
 cosmic objects get <id>
 cosmic objects get <id> --json
+cosmic objects get <id> --props "id,title,metadata" --depth 2
 ```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-p, --props <props>` | Properties to return (comma-separated) |
+| `-d, --depth <n>` | Depth for nested object references |
+| `--json` | Output as JSON |
 
 ### `cosmic objects create`
 

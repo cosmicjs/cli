@@ -31,11 +31,13 @@ async function listObjects(options: {
   status?: string;
   limit?: string;
   skip?: string;
+  props?: string;
+  depth?: string;
   json?: boolean;
 }): Promise<void> {
   requireBucket();
   const sdk = getSDKClient();
-  
+
   if (!sdk) {
     display.error('SDK not available. Configure bucket keys first.');
     process.exit(1);
@@ -43,15 +45,29 @@ async function listObjects(options: {
 
   try {
     spinner.start('Loading objects...');
-    
+
     // Build query for SDK - SDK uses chaining: find(query).status('any').limit(n)
     const query: Record<string, unknown> = {};
     if (options.type) query.type = options.type;
-    
+
     const limit = options.limit ? parseInt(options.limit, 10) : 10;
-    // Use .status('any') to fetch both published and draft objects
-    const result = await sdk.objects.find(query).status('any').limit(limit);
-    
+
+    // Build the query chain
+    let chain = sdk.objects.find(query).status('any').limit(limit);
+
+    // Add props if specified
+    if (options.props) {
+      const propsArray = options.props.split(',').map(p => p.trim());
+      chain = chain.props(propsArray);
+    }
+
+    // Add depth if specified
+    if (options.depth) {
+      chain = chain.depth(parseInt(options.depth, 10));
+    }
+
+    const result = await chain;
+
     const objects = result.objects || [];
     const total = result.total || objects.length;
     spinner.succeed(`Found ${total} object(s)`);
@@ -72,7 +88,7 @@ async function listObjects(options: {
 
     for (const obj of objects) {
       table.push([
-        chalk.dim(obj.id.slice(0, 8)),
+        chalk.dim(obj.id),
         display.truncate(obj.title, 40),
         chalk.cyan(obj.type),
         display.formatStatus(obj.status),
@@ -97,11 +113,11 @@ async function listObjects(options: {
  */
 async function getObject(
   objectId: string,
-  options: { json?: boolean }
+  options: { props?: string; depth?: string; json?: boolean }
 ): Promise<void> {
   requireBucket();
   const sdk = getSDKClient();
-  
+
   if (!sdk) {
     display.error('SDK not available. Configure bucket keys first.');
     process.exit(1);
@@ -110,14 +126,27 @@ async function getObject(
   try {
     spinner.start('Loading object...');
     // Use find().status('any').limit(1) because findOne doesn't support .status() chaining
-    const findResult = await sdk.objects.find({ id: objectId }).status('any').limit(1);
+    let chain = sdk.objects.find({ id: objectId }).status('any').limit(1);
+
+    // Add props if specified
+    if (options.props) {
+      const propsArray = options.props.split(',').map(p => p.trim());
+      chain = chain.props(propsArray);
+    }
+
+    // Add depth if specified
+    if (options.depth) {
+      chain = chain.depth(parseInt(options.depth, 10));
+    }
+
+    const findResult = await chain;
     const obj = findResult.objects?.[0];
-    
+
     if (!obj) {
       spinner.fail('Object not found');
       return;
     }
-    
+
     spinner.succeed();
 
     if (options.json) {
@@ -163,7 +192,7 @@ async function createObject(options: {
 }): Promise<void> {
   requireBucket();
   const sdk = getSDKClient();
-  
+
   if (!sdk) {
     display.error('SDK not available. Configure bucket keys first.');
     process.exit(1);
@@ -234,7 +263,7 @@ async function updateObject(
 ): Promise<void> {
   requireBucket();
   const sdk = getSDKClient();
-  
+
   if (!sdk) {
     display.error('SDK not available. Configure bucket keys first.');
     process.exit(1);
@@ -282,7 +311,7 @@ async function deleteObjects(
 ): Promise<void> {
   requireBucket();
   const sdk = getSDKClient();
-  
+
   if (!sdk) {
     display.error('SDK not available. Configure bucket keys first.');
     process.exit(1);
@@ -422,12 +451,16 @@ export function createObjectsCommands(program: Command): void {
     .option('-s, --status <status>', 'Filter by status (published, draft, any)')
     .option('-l, --limit <number>', 'Limit results', '10')
     .option('--skip <number>', 'Skip results', '0')
+    .option('-p, --props <props>', 'Properties to return (comma-separated, e.g. "id,title,slug,metadata")')
+    .option('-d, --depth <number>', 'Depth for nested object references')
     .option('--json', 'Output as JSON')
     .action(listObjects);
 
   objectsCmd
     .command('get <id>')
     .description('Get object details')
+    .option('-p, --props <props>', 'Properties to return (comma-separated, e.g. "id,title,slug,metadata")')
+    .option('-d, --depth <number>', 'Depth for nested object references')
     .option('--json', 'Output as JSON')
     .action(getObject);
 

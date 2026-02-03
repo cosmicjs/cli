@@ -150,16 +150,27 @@ async function ls(path?: string): Promise<void> {
 async function listProjects(): Promise<void> {
   try {
     spinner.start('Loading...');
-    const projectList = await api.listProjects();
+    const workspaceId = getCurrentWorkspaceId();
+    const workspaceSlug = getConfigValue('currentWorkspace');
+    const projectList = await api.listProjects(workspaceId);
     spinner.stop();
 
     if (projectList.length === 0) {
       display.info('No projects found');
+      if (workspaceSlug) {
+        console.log();
+        console.log(chalk.dim(`    Workspace: ${chalk.cyan(workspaceSlug)}`));
+        console.log(chalk.dim(`    Switch workspaces with: ${chalk.cyan('cosmic use <workspace-slug>')}`));
+      }
       return;
     }
 
     console.log();
-    console.log(chalk.bold.cyan('    Projects'));
+    if (workspaceSlug) {
+      console.log(chalk.bold.cyan(`    Projects in ${workspaceSlug}`));
+    } else {
+      console.log(chalk.bold.cyan('    Projects'));
+    }
     console.log(chalk.dim('    ' + '─'.repeat(60)));
     console.log();
 
@@ -171,6 +182,12 @@ async function listProjects(): Promise<void> {
       const bucketText = `${buckets} bucket${Number(buckets) !== 1 ? 's' : ''}`;
 
       console.log(`    📁  ${chalk.cyan(id.padEnd(26))}${title.padEnd(28)}${chalk.dim(bucketText)}`);
+    }
+    console.log();
+    if (workspaceSlug) {
+      console.log(chalk.dim(`    Switch workspaces: ${chalk.cyan('cosmic use <workspace-slug>')}  or  ${chalk.cyan('cosmic use -')} for default projects`));
+    } else {
+      console.log(chalk.dim(`    Switch to a workspace: ${chalk.cyan('cosmic use <workspace-slug>')}`));
     }
     console.log();
   } catch (error) {
@@ -254,7 +271,7 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
   } catch (error) {
     spinner.fail('Failed to load object types');
     const errorMessage = (error as Error).message;
-    
+
     // Check if the bucket was deleted
     if (errorMessage.includes('not found') || errorMessage.includes('bucket with slug')) {
       console.log();
@@ -264,7 +281,7 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
       console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
       console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
       console.log();
-      
+
       // Clear the bucket context
       clearConfigValue('currentBucket');
       clearConfigValue('currentObjectType');
@@ -318,7 +335,7 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
   } catch (error) {
     spinner.fail('Failed to load objects');
     const errorMessage = (error as Error).message;
-    
+
     // Check if the bucket was deleted
     if (errorMessage.includes('not found') || errorMessage.includes('bucket with slug')) {
       console.log();
@@ -328,7 +345,7 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
       console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
       console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
       console.log();
-      
+
       // Clear the bucket context
       clearConfigValue('currentBucket');
       clearConfigValue('currentObjectType');
@@ -639,7 +656,7 @@ async function cd(path?: string): Promise<void> {
     } catch (error) {
       spinner.fail('Not found');
       const errorMessage = (error as Error).message;
-      
+
       // Check if the bucket was deleted
       if (errorMessage.includes('not found') || errorMessage.includes('bucket with slug')) {
         console.log();
@@ -649,7 +666,7 @@ async function cd(path?: string): Promise<void> {
         console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
         console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
         console.log();
-        
+
         // Clear the bucket context
         clearConfigValue('currentBucket');
         clearConfigValue('currentObjectType');

@@ -153,7 +153,7 @@ export function hasSDKClient(): boolean {
 export function clearSDKClient(): void {
   sdkClient = null;
   currentBucketSlug = null;
-  currentSdkUrl = null;
+  currentCacheKey = null;
 }
 
 /**
