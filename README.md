@@ -1,21 +1,25 @@
 # Cosmic CLI
 
-AI-powered command-line interface for [Cosmic CMS](https://www.cosmicjs.com). Manage your content, media, workflows, and AI agents through natural language and direct commands.
+AI-powered command-line interface for [Cosmic CMS](https://www.cosmicjs.com). Manage your content, media, repositories, deployments, workflows, and AI agents through natural language and direct commands.
 
 ## Features
 
 - **AI-Powered Chat Mode** - Interact with your content using natural language
-- **Direct Commands** - Full CRUD for objects, media, workflows, and agents
+- **Shortcut Commands** - `content`, `build`, and `update` for common AI workflows
+- **Direct Commands** - Full CRUD for objects, media, repos, workflows, and agents
+- **Repository & Deploy** - Connect GitHub repos and deploy to Vercel
 - **Multiple Auth Methods** - User login (JWT) or bucket keys
-- **Context Management** - Switch between workspaces, projects, and buckets
-- **AI Generation** - Generate text and images directly from the CLI
+- **Context Management** - Navigate workspaces, projects, and buckets like a filesystem
+- **AI Generation** - Generate text and images with streaming output
 - **AI Agents** - Content, repository, and computer use agents with scheduling
 - **Auth Capture** - Capture browser auth locally for computer use agents
+
+> **Full Reference:** See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for complete command documentation.
 
 ## Installation
 
 ```bash
-# Install globally
+# Install globally with npm
 npm install -g @cosmicjs/cli
 
 # Or with bun
@@ -32,7 +36,12 @@ cosmic login
 cosmic use my-workspace/my-project/my-bucket
 
 # Start interactive chat mode
-cosmic
+cosmic chat
+
+# Or use shortcut commands
+cosmic content              # Create/manage content with AI
+cosmic build                # Build a new app with AI
+cosmic update my-repo       # Update existing code with AI
 ```
 
 ## Authentication
@@ -43,6 +52,8 @@ Login with your Cosmic account for full dashboard access:
 
 ```bash
 cosmic login
+cosmic whoami               # Show current user
+cosmic logout               # Clear credentials
 ```
 
 ### Bucket Key Authentication
@@ -53,84 +64,22 @@ For quick bucket-level access without logging in:
 cosmic use --bucket=my-bucket --read-key=your-read-key --write-key=your-write-key
 ```
 
-## Commands
+## Core Commands
 
-### Auth
-
-```bash
-cosmic login                # Login to Cosmic
-cosmic logout               # Clear credentials
-cosmic whoami               # Show current user
-```
-
-### Context
+### Context & Navigation
 
 ```bash
-cosmic use <ws>/<proj>/<bucket>    # Set working context
+# Set working context
+cosmic use <workspace>/<project>/<bucket>
 cosmic context                      # Show current context
-cosmic workspaces                   # List workspaces
-cosmic projects                     # List projects
-cosmic models                       # List available AI models
-```
 
-### Navigation
-
-Navigate your Cosmic content like a filesystem:
-
-```bash
-cosmic pwd                    # Show current location
-cosmic ls                     # List contents at current level
-cosmic ls /                   # List all projects
-cosmic ls /project-id         # List buckets in project
-cosmic ls /project/bucket     # List object types in bucket
-cosmic cd project-id          # Navigate into a project
-cosmic cd bucket-slug         # Navigate into a bucket
-cosmic cd posts               # Navigate into an object type
-cosmic cd ..                  # Go up one level
-cosmic cd /                   # Go to root (home)
-```
-
-#### Navigation Hierarchy
-
-```
-/ (root)
-└── project-id/
-    └── bucket-slug/
-        └── object-type/
-            └── objects...
-```
-
-Example workflow:
-
-```bash
-$ cosmic ls
-    Projects
-    ────────────────────────────────────────────────────────
-    📁  my-project              My Project              3 buckets
-
-$ cosmic cd my-project
-  ✓ Now in Project: My Project
-
-$ cosmic ls
-    Buckets in My Project
-    ────────────────────────────────────────────────────────
-    📦  production
-        Production (42 objects)
-
-    📦  staging
-        Staging (15 objects)
-
-$ cosmic cd production
-  ✓ Now in Bucket: Production
-
-$ cosmic ls
-    Object Types in production
-    ────────────────────────────────────────────────────────
-    📄  posts                   Blog Posts              12 objects
-    📄  authors                 Authors                 3 objects
-
-$ cosmic cd ..
-  ✓ Now in Project: My Project
+# Navigate like a filesystem
+cosmic ls                           # List contents at current level
+cosmic cd my-project                # Navigate into project
+cosmic cd my-bucket                 # Navigate into bucket
+cosmic cd posts                     # Navigate into object type
+cosmic cd ..                        # Go up one level
+cosmic pwd                          # Show current location
 ```
 
 ### Objects
@@ -140,7 +89,7 @@ cosmic objects list                          # List objects
 cosmic objects list --type=posts             # Filter by type
 cosmic objects list --status=draft           # Filter by status
 cosmic objects get <id>                      # Get object details
-cosmic objects create --type=posts           # Create object
+cosmic objects create --type=posts           # Create object (interactive)
 cosmic objects update <id> --title="New"     # Update object
 cosmic objects delete <id>                   # Delete object
 cosmic objects publish <id>                  # Publish object
@@ -157,17 +106,43 @@ cosmic media upload ./image.png      # Upload file
 cosmic media delete <id>             # Delete media
 ```
 
+### Repositories
+
+```bash
+cosmic repos list                              # List connected repos
+cosmic repos get <id>                          # Get repo details
+cosmic repos connect --url <github-url>        # Connect a GitHub repo
+cosmic repos delete <id>                       # Disconnect repo
+
+# Branch management
+cosmic repos branches <repoId> list            # List branches
+cosmic repos branches <repoId> create          # Create branch
+cosmic repos branches <repoId> delete <name>   # Delete branch
+```
+
+### Deployments
+
+```bash
+cosmic deploy start <repoId>                   # Deploy to Vercel
+cosmic deploy start <repoId> --watch           # Deploy and watch progress
+cosmic deploy list <repoId>                    # List deployments
+cosmic deploy logs <deploymentId>              # Get logs
+cosmic deploy logs <deploymentId> --follow     # Stream logs
+cosmic deploy cancel <repoId> <deploymentId>   # Cancel deployment
+```
+
 ### Workflows
 
 ```bash
-cosmic workflows list                      # List workflows
-cosmic workflows get <id>                  # Get workflow details
-cosmic workflows create --agent <agentId>  # Create workflow with initial agent
-cosmic workflows add-step <id> --agent <agentId>  # Add agent as step
-cosmic workflows remove-step <id> --step 2        # Remove step by number
-cosmic workflows run <id>                  # Execute workflow
-cosmic workflows executions                # List executions
-cosmic workflows cancel <id>               # Cancel execution
+cosmic workflows list                          # List workflows
+cosmic workflows get <id>                      # Get workflow details
+cosmic workflows create --agent <agentId>      # Create with initial agent
+cosmic workflows add-step <id> --agent <id>    # Add agent as step
+cosmic workflows remove-step <id> --step 2     # Remove step
+cosmic workflows run <id>                      # Execute workflow
+cosmic workflows executions                    # List executions
+cosmic workflows executions <execId>           # Get execution details
+cosmic workflows cancel <execId>               # Cancel execution
 ```
 
 ### Agents
@@ -175,156 +150,131 @@ cosmic workflows cancel <id>               # Cancel execution
 ```bash
 cosmic agents list                   # List agents
 cosmic agents get <id>               # Get agent details
-cosmic agents create --type=content  # Create content agent
+cosmic agents create --type=content  # Create agent (interactive)
 cosmic agents run <id>               # Run agent
-cosmic agents executions <agentId>   # List agent executions
+cosmic agents executions <agentId>   # List executions
 cosmic agents delete <id>            # Delete agent
+
+# Advanced agent operations
+cosmic agents follow-up <agentId>              # Continue work on same branch
+cosmic agents pr <agentId>                     # Create PR from agent work
+cosmic agents approve <agentId> <execId>       # Approve pending operations
+cosmic agents capture-auth --url <login-url>   # Capture browser auth
 ```
 
 #### Agent Types
 
-- **content** - Creates and manages content in your bucket
-- **repository** - Makes code changes to connected repositories  
-- **computer_use** - Browser automation with AI vision
-
-#### Creating Agents
-
-```bash
-# Content agent
-cosmic agents create \
-  --type content \
-  --name "Blog Writer" \
-  --prompt "Write engaging blog posts about technology"
-
-# Repository agent (code changes)
-cosmic agents create \
-  --type repository \
-  --name "Bug Fixer" \
-  --prompt "Fix the bug described in the issue"
-
-# Computer use agent (browser automation)
-cosmic agents create \
-  --type computer_use \
-  --name "Web Scraper" \
-  --start-url "https://example.com" \
-  --prompt "Extract the main content from the page"
-```
-
-#### Scheduling Agents
-
-Run agents on a schedule:
-
-```bash
-cosmic agents create \
-  --type content \
-  --name "Daily News Digest" \
-  --prompt "Create a summary of today's tech news" \
-  --schedule \
-  --schedule-frequency daily \
-  --timezone "America/New_York"
-```
-
-Schedule options:
-- `--schedule` - Enable scheduling
-- `--schedule-type` - `once` or `recurring` (default: recurring)
-- `--schedule-frequency` - `hourly`, `daily`, `weekly`, `monthly`
-- `--timezone` - Timezone for schedule (default: UTC)
-
-### Auth Capture (for Computer Use Agents)
-
-Capture authentication from your local browser for use with computer use agents:
-
-```bash
-# Open browser, log in manually, then click "Done - Capture Auth"
-cosmic agents capture-auth --url https://example.com/login
-
-# Returns a session ID like: a1b2c3d4-5678-90ab-cdef-1234567890ab
-```
-
-Use the captured auth session when creating a computer use agent:
-
-```bash
-cosmic agents create \
-  --type computer_use \
-  --name "Dashboard Bot" \
-  --start-url "https://example.com/dashboard" \
-  --prompt "Check the analytics and report key metrics" \
-  --auth-session a1b2c3d4-5678-90ab-cdef-1234567890ab
-```
-
-This allows agents to access authenticated pages without handling login flows.
+| Type | Alias | Description |
+|------|-------|-------------|
+| `content` | - | Creates and manages content in your bucket |
+| `repository` | `code`, `repo` | Makes code changes to connected repositories |
+| `computer_use` | - | Browser automation with AI vision |
 
 ### AI Generation
 
 ```bash
-cosmic ai generate "Write a blog post about AI"   # Generate text
-cosmic ai image "Mountain landscape at sunset"    # Generate image
-cosmic ai chat "Tell me about my content"         # Single chat message
+cosmic ai generate "Your prompt"               # Generate text (streaming)
+cosmic ai generate "prompt" --model=gpt-5      # Specify model
+cosmic ai image "A sunset over mountains"      # Generate image
+cosmic ai image "prompt" --folder=heroes       # Save to folder
+cosmic ai chat "Tell me about my content"      # Single chat message
 ```
 
-### Configuration
+## Shortcut Commands
+
+These shortcuts make common AI workflows faster:
+
+### Content Mode
+
+Create and manage content with AI assistance:
 
 ```bash
-cosmic config get                               # Show all config
-cosmic config get defaultModel                  # Get specific value
-cosmic config set defaultModel gpt-5            # Set config value
+cosmic content                                 # Start content chat
+cosmic content -p "Create 5 blog posts"        # With initial prompt
+cosmic content --types posts,authors           # Include specific object types
+cosmic content --ask                           # Read-only mode (no changes)
+```
+
+### Build Mode
+
+Generate complete applications:
+
+```bash
+cosmic build                                   # Start build chat (interactive)
+cosmic build -p "A blog with dark mode"        # With description
+cosmic build --types posts                     # Include content as context
+cosmic build --ask                             # Ask questions without generating
+```
+
+### Update Mode
+
+Modify existing repository code:
+
+```bash
+cosmic update                                  # Select repo interactively
+cosmic update my-repo                          # Specify repo
+cosmic update my-repo -b feature-branch        # Specify branch
+cosmic update my-repo -p "Add dark mode"       # With instructions
+cosmic update --ask                            # Explore code without changes
 ```
 
 ## Interactive Chat Mode
 
-Run `cosmic` without arguments to start the interactive AI chat:
-
-```
-$ cosmic
-
-  Cosmic CLI v1.0.0
-  Logged in as: tony@cosmic.com
-  Context: my-workspace / my-project / my-bucket
-
-> list all blog posts
-
-  Found 5 posts:
-  1. "Welcome Post" (published)
-  2. "Product Update" (draft)
-  ...
-
-> publish post 2
-
-  ✓ Published "Product Update"
-
-> create a new post titled "Hello World"
-
-  ✓ Created post "Hello World" (draft)
-
-> exit
-```
-
-### Chat Modes
+Start an interactive AI chat session:
 
 ```bash
-cosmic chat              # Default ask mode (read-only)
-cosmic chat --content    # Content mode (can create/update content)
-cosmic chat --build      # Build mode (for app development)
-cosmic chat --repo       # Repository mode (for code changes)
+cosmic chat                  # Default ask mode (read-only)
+cosmic chat --content        # Content mode (can modify content)
+cosmic chat --build          # Build mode (generate apps)
+cosmic chat --repo           # Repository mode (code changes)
+```
+
+### Context Options
+
+Provide context to the AI:
+
+```bash
+cosmic chat --types posts,authors              # Include object types
+cosmic chat --links "https://docs.example.com" # Include external URLs
+cosmic chat --objects-limit 50                 # Max objects per type
+cosmic chat --objects-depth 2                  # Nested metafield depth
 ```
 
 ### Chat Commands
 
-- `exit` / `quit` - Exit chat mode
+Inside chat mode:
+- `exit` / `quit` - Exit chat
 - `clear` - Clear conversation history
 - `context` - Show current context
-- `help` - Show help
+- `help` - Show available commands
 
-## Configuration Files
+## Configuration
 
-Configuration is stored in `~/.cosmic/`:
+```bash
+cosmic config get                    # Show all config
+cosmic config get defaultModel       # Get specific value
+cosmic config set defaultModel gpt-5 # Set value
+```
 
-- `config.json` - Settings (current context, default model, etc.)
-- `credentials.json` - Authentication tokens
+### Config Options
+
+| Option | Description |
+|--------|-------------|
+| `defaultModel` | Default AI model for generation |
+| `apiUrl` | Custom API URL |
+| `sdkUrl` | Custom SDK URL (for local development) |
+
+Configuration stored in `~/.cosmic/`:
+- `config.json` - Settings
+- `credentials.json` - Auth tokens
 
 ## AI Models
 
-The CLI supports all Cosmic AI models. Set your default:
+```bash
+cosmic models                        # List all available models
+```
+
+Set your default model:
 
 ```bash
 cosmic config set defaultModel claude-opus-4-5-20251101
@@ -336,46 +286,27 @@ Or specify per-command:
 cosmic ai generate --model=gpt-5 "Your prompt"
 ```
 
-Available models include:
-
-- Claude (Anthropic): `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
-- GPT (OpenAI): `gpt-5`, `gpt-5.2`, `gpt-5-mini`, `gpt-4o`
-- Gemini (Google): `gemini-3-pro-preview`
-
-Use `cosmic models` to see all available models.
+**Available models:**
+- **Claude (Anthropic):** `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
+- **GPT (OpenAI):** `gpt-5`, `gpt-5.2`, `gpt-5-mini`, `gpt-4o`
+- **Gemini (Google):** `gemini-3-pro-preview`
 
 ## Examples
 
-### Content Management
+### Build and Deploy an App
 
 ```bash
-# List all published posts
-cosmic objects list --type=posts --status=published
+# Build a new app
+cosmic build -p "A recipe blog with categories and search"
 
-# Create a new blog post
-cosmic objects create --type=posts --title="My New Post" --status=draft
+# Connect the generated repo
+cosmic repos connect --url https://github.com/myuser/recipe-blog
 
-# Update and publish
-cosmic objects update abc123 --metadata '{"content":"Updated content"}'
-cosmic objects publish abc123
+# Deploy to Vercel
+cosmic deploy start <repoId> --watch
 ```
 
-### Workflow Automation
-
-```bash
-# Create a multi-step workflow
-cosmic workflows create --name "Content Pipeline" --agent writer-agent-id
-cosmic workflows add-step pipeline-id --agent editor-agent-id
-cosmic workflows add-step pipeline-id --agent publisher-agent-id
-
-# Run a workflow
-cosmic workflows run pipeline-id
-
-# Check execution status
-cosmic workflows executions pipeline-id
-```
-
-### Agent Automation
+### Agent Workflow
 
 ```bash
 # Create a scheduled content agent
@@ -386,55 +317,81 @@ cosmic agents create \
   --schedule \
   --schedule-frequency weekly
 
-# Create a computer use agent with pre-captured auth
-cosmic agents capture-auth --url https://analytics.example.com/login
-# (log in manually, click Done)
-# Session ID: abc123...
+# Create a repository agent
+cosmic agents create \
+  --type repo \
+  --name "Bug Fixer" \
+  --prompt "Fix the accessibility issues" \
+  --run
 
+# Create PR from agent's work
+cosmic agents pr <agentId>
+```
+
+### Computer Use Agent with Auth
+
+```bash
+# Capture authentication
+cosmic agents capture-auth --url https://dashboard.example.com/login
+# (Browser opens, log in, click "Done - Capture Auth")
+# Returns session ID: abc123...
+
+# Create agent with pre-captured auth
 cosmic agents create \
   --type computer_use \
-  --name "Analytics Reporter" \
-  --start-url "https://analytics.example.com/dashboard" \
-  --prompt "Screenshot the weekly metrics and create a summary" \
+  --name "Dashboard Reporter" \
+  --start-url "https://dashboard.example.com" \
+  --prompt "Screenshot the weekly metrics" \
   --auth-session abc123...
 ```
 
-### AI-Assisted Content
+### Multi-Step Workflow
 
 ```bash
-# Generate text content
-cosmic ai generate "Write a product description for a coffee mug" --model=claude-sonnet-4-5-20250929
+# Create workflow with initial agent
+cosmic workflows create --name "Content Pipeline" --agent writer-id
 
-# Generate and save an image
-cosmic ai image "Professional headshot placeholder" --folder=avatars
+# Add more steps
+cosmic workflows add-step <workflowId> --agent editor-id
+cosmic workflows add-step <workflowId> --agent publisher-id
 
-# Interactive content creation
-cosmic
-> generate 5 blog post ideas about web development
-> create a post from idea 3
-> add a hero image for it
+# Execute
+cosmic workflows run <workflowId>
+
+# Monitor
+cosmic workflows executions <executionId>
+```
+
+## Global Options
+
+All commands support:
+
+```bash
+--json          # Output as JSON (for scripting)
+--verbose, -v   # Enable verbose output
+--no-color      # Disable colored output
+```
+
+## Environment Variables
+
+```bash
+COSMIC_DEBUG=1  # Enable debug output
 ```
 
 ## Development
 
 ```bash
-# Clone the repo
 git clone https://github.com/cosmicjs/cli.git
 cd cli
-
-# Install dependencies
 bun install
-
-# Build
 bun run build
-
-# Run in development
 bun run dev
 ```
 
 ## Support
 
 - [Cosmic Documentation](https://www.cosmicjs.com/docs)
+- [Full CLI Reference](docs/CLI_REFERENCE.md)
 - [Discord Community](https://discord.gg/MSCwQ7D6Mg)
 - [GitHub Issues](https://github.com/cosmicjs/cli/issues)
 

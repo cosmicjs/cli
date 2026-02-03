@@ -1,0 +1,1064 @@
+# Cosmic CLI - Full Reference
+
+Complete command reference for the Cosmic CLI. For a quick overview, see the [README](../README.md).
+
+## Table of Contents
+
+- [Global Options](#global-options)
+- [Authentication](#authentication)
+- [Context & Navigation](#context--navigation)
+- [Objects](#objects)
+- [Media](#media)
+- [Repositories](#repositories)
+- [Deployments](#deployments)
+- [Workflows](#workflows)
+- [Agents](#agents)
+- [AI Generation](#ai-generation)
+- [Interactive Chat](#interactive-chat)
+- [Shortcut Commands](#shortcut-commands)
+- [Configuration](#configuration)
+- [Command Aliases](#command-aliases)
+
+---
+
+## Global Options
+
+These options work with all commands:
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON for scripting/automation |
+| `-v, --verbose` | Enable verbose output |
+| `--no-color` | Disable colored output |
+| `--help` | Show help for command |
+| `--version` | Show CLI version |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `COSMIC_DEBUG=1` | Enable debug output with detailed error information |
+
+---
+
+## Authentication
+
+### `cosmic login`
+
+Login to your Cosmic account. Opens browser for OAuth authentication.
+
+```bash
+cosmic login
+```
+
+### `cosmic logout`
+
+Clear stored credentials.
+
+```bash
+cosmic logout
+```
+
+### `cosmic whoami`
+
+Show current authenticated user.
+
+```bash
+cosmic whoami
+```
+
+---
+
+## Context & Navigation
+
+### `cosmic use`
+
+Set the working context (workspace, project, bucket).
+
+```bash
+# Full path
+cosmic use <workspace>/<project>/<bucket>
+
+# With bucket keys (no login required)
+cosmic use --bucket=<slug> --read-key=<key> --write-key=<key>
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--bucket <slug>` | Bucket slug |
+| `--read-key <key>` | Bucket read key |
+| `--write-key <key>` | Bucket write key |
+
+### `cosmic context`
+
+Show current working context.
+
+```bash
+cosmic context
+```
+
+### `cosmic workspaces`
+
+List available workspaces.
+
+```bash
+cosmic workspaces
+cosmic workspaces --json
+```
+
+### `cosmic projects`
+
+List projects in current workspace.
+
+```bash
+cosmic projects
+cosmic projects --json
+```
+
+### `cosmic models`
+
+List available AI models.
+
+```bash
+cosmic models
+cosmic models --json
+```
+
+### `cosmic ls`
+
+List contents at current navigation level.
+
+```bash
+cosmic ls                     # List at current level
+cosmic ls /                   # List all projects
+cosmic ls /project-id         # List buckets in project
+cosmic ls /project/bucket     # List object types in bucket
+```
+
+### `cosmic cd`
+
+Navigate the content hierarchy.
+
+```bash
+cosmic cd project-id          # Navigate into project
+cosmic cd bucket-slug         # Navigate into bucket
+cosmic cd posts               # Navigate into object type
+cosmic cd ..                  # Go up one level
+cosmic cd /                   # Go to root
+```
+
+### `cosmic pwd`
+
+Show current navigation location.
+
+```bash
+cosmic pwd
+```
+
+---
+
+## Objects
+
+### `cosmic objects list`
+
+List objects in current bucket.
+
+```bash
+cosmic objects list
+cosmic objects ls                            # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--type <slug>` | Filter by object type |
+| `--status <status>` | Filter by status (`published`, `draft`) |
+| `--limit <n>` | Limit results |
+| `--json` | Output as JSON |
+
+### `cosmic objects get`
+
+Get object details.
+
+```bash
+cosmic objects get <id>
+cosmic objects get <id> --json
+```
+
+### `cosmic objects create`
+
+Create a new object (interactive).
+
+```bash
+cosmic objects create
+cosmic objects create --type=posts
+cosmic objects create --type=posts --title="My Post"
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--type <slug>` | Object type slug |
+| `--title <title>` | Object title |
+| `--slug <slug>` | Object slug |
+| `--status <status>` | Status (`published`, `draft`) |
+| `--content <content>` | Content/body text |
+| `--metadata <json>` | Metadata as JSON string |
+| `--json` | Output as JSON |
+
+### `cosmic objects update`
+
+Update an existing object.
+
+```bash
+cosmic objects update <id> --title="New Title"
+cosmic objects update <id> --metadata='{"key":"value"}'
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | New title |
+| `--slug <slug>` | New slug |
+| `--status <status>` | New status |
+| `--content <content>` | New content |
+| `--metadata <json>` | New metadata (JSON) |
+| `--json` | Output as JSON |
+
+### `cosmic objects delete`
+
+Delete an object.
+
+```bash
+cosmic objects delete <id>
+cosmic objects rm <id>                       # Alias
+cosmic objects delete <id> --force           # Skip confirmation
+```
+
+### `cosmic objects publish`
+
+Publish a draft object.
+
+```bash
+cosmic objects publish <id>
+```
+
+### `cosmic objects types`
+
+List object types in current bucket.
+
+```bash
+cosmic objects types
+cosmic objects types --json
+```
+
+---
+
+## Media
+
+### `cosmic media list`
+
+List media files.
+
+```bash
+cosmic media list
+cosmic media ls                              # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--folder <folder>` | Filter by folder |
+| `--limit <n>` | Limit results |
+| `--json` | Output as JSON |
+
+### `cosmic media get`
+
+Get media file details.
+
+```bash
+cosmic media get <id>
+cosmic media get <id> --json
+```
+
+### `cosmic media upload`
+
+Upload a file to the media library.
+
+```bash
+cosmic media upload ./image.png
+cosmic media upload ./photo.jpg --folder=photos
+cosmic media upload ./hero.png --alt-text="Hero image"
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --folder <folder>` | Target folder |
+| `-a, --alt-text <text>` | Alt text for accessibility |
+| `--json` | Output as JSON |
+
+### `cosmic media delete`
+
+Delete a media file.
+
+```bash
+cosmic media delete <id>
+cosmic media rm <id>                         # Alias
+cosmic media delete <id> --force             # Skip confirmation
+```
+
+---
+
+## Repositories
+
+### `cosmic repos list`
+
+List connected GitHub repositories.
+
+```bash
+cosmic repos list
+cosmic repos ls                              # Alias
+cosmic repos                                 # Default action
+cosmic repositories list                     # Full alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic repos get`
+
+Get repository details.
+
+```bash
+cosmic repos get <id>
+cosmic repos get <id> --json
+```
+
+### `cosmic repos connect`
+
+Connect a GitHub repository.
+
+```bash
+cosmic repos connect
+cosmic repos connect --url https://github.com/user/repo
+cosmic repos add --url https://github.com/user/repo    # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-n, --name <name>` | Repository name |
+| `-u, --url <url>` | GitHub repository URL |
+| `-f, --framework <fw>` | Framework (`nextjs`, `react`, `vue`, `nuxt`, `astro`, `svelte`, `other`) |
+| `--json` | Output as JSON |
+
+### `cosmic repos delete`
+
+Disconnect a repository (does not delete the GitHub repo).
+
+```bash
+cosmic repos delete <id>
+cosmic repos rm <id>                         # Alias
+cosmic repos delete <id> --force             # Skip confirmation
+```
+
+### Branch Management
+
+#### `cosmic repos branches <repoId> list`
+
+List branches for a repository.
+
+```bash
+cosmic repos branches <repoId> list
+cosmic repos branches <repoId> ls            # Alias
+cosmic repos branches <repoId>               # Default action
+```
+
+#### `cosmic repos branches <repoId> create`
+
+Create a new branch.
+
+```bash
+cosmic repos branches <repoId> create
+cosmic repos branches <repoId> create --name feature-x
+cosmic repos branches <repoId> create --name feature-x --from main
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-n, --name <name>` | Branch name |
+| `--from <branch>` | Source branch (default: main) |
+| `--json` | Output as JSON |
+
+#### `cosmic repos branches <repoId> delete`
+
+Delete a branch.
+
+```bash
+cosmic repos branches <repoId> delete <branchName>
+cosmic repos branches <repoId> rm <branchName>       # Alias
+cosmic repos branches <repoId> delete <name> --force # Skip confirmation
+```
+
+---
+
+## Deployments
+
+### `cosmic deploy start`
+
+Deploy a repository to Vercel.
+
+```bash
+cosmic deploy start <repositoryId>
+cosmic deploy trigger <repositoryId>         # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-w, --watch` | Watch deployment progress until complete |
+| `--json` | Output as JSON |
+
+### `cosmic deploy list`
+
+List deployments for a repository.
+
+```bash
+cosmic deploy list <repositoryId>
+cosmic deploy ls <repositoryId>              # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-n, --limit <n>` | Number of deployments to show (default: 10) |
+| `--json` | Output as JSON |
+
+### `cosmic deploy logs`
+
+Get deployment logs.
+
+```bash
+cosmic deploy logs <deploymentId>
+cosmic deploy logs <deploymentId> --follow   # Stream logs in real-time
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --follow` | Follow/stream logs |
+| `--json` | Output as JSON |
+
+### `cosmic deploy cancel`
+
+Cancel an in-progress deployment.
+
+```bash
+cosmic deploy cancel <repositoryId> <deploymentId>
+cosmic deploy cancel <repoId> <deploymentId> --force  # Skip confirmation
+```
+
+---
+
+## Workflows
+
+### `cosmic workflows list`
+
+List workflows.
+
+```bash
+cosmic workflows list
+cosmic workflows ls                          # Alias
+cosmic wf list                               # Short alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-s, --status <status>` | Filter by status (`active`, `draft`, `paused`) |
+| `--schedule-type <type>` | Filter by schedule type (`manual`, `cron`, `event_triggered`) |
+| `-l, --limit <n>` | Limit results |
+| `--json` | Output as JSON |
+
+### `cosmic workflows get`
+
+Get workflow details.
+
+```bash
+cosmic workflows get <id>
+cosmic workflows get <id> --json
+```
+
+### `cosmic workflows create`
+
+Create a new workflow with an initial agent step.
+
+```bash
+cosmic workflows create
+cosmic workflows create --name "My Workflow" --agent <agentId>
+cosmic workflows add                         # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-n, --name <name>` | Workflow name |
+| `-d, --description <desc>` | Description |
+| `-a, --agent <agentId>` | Initial agent ID for first step |
+| `--schedule-type <type>` | Schedule type (`manual`, `cron`, `event_triggered`) |
+| `--status <status>` | Initial status (`draft`, `active`, `paused`) |
+| `--json` | Output as JSON |
+
+### `cosmic workflows add-step`
+
+Add an agent as a step to an existing workflow.
+
+```bash
+cosmic workflows add-step <workflowId>
+cosmic workflows add-step <workflowId> --agent <agentId>
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-a, --agent <agentId>` | Agent ID to add |
+| `--json` | Output as JSON |
+
+### `cosmic workflows remove-step`
+
+Remove a step from a workflow.
+
+```bash
+cosmic workflows remove-step <workflowId>
+cosmic workflows remove-step <workflowId> --step 2
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-s, --step <n>` | Step number to remove (1-based) |
+| `-f, --force` | Skip confirmation |
+| `--json` | Output as JSON |
+
+### `cosmic workflows run`
+
+Execute a workflow.
+
+```bash
+cosmic workflows run <id>
+cosmic workflows execute <id>                # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-i, --inputs <json>` | User inputs as JSON string |
+| `--json` | Output as JSON |
+
+### `cosmic workflows delete`
+
+Delete a workflow.
+
+```bash
+cosmic workflows delete <id>
+cosmic workflows rm <id>                     # Alias
+cosmic workflows delete <id> --force         # Skip confirmation
+```
+
+### `cosmic workflows executions`
+
+List or get execution details.
+
+```bash
+cosmic workflows executions                  # List all executions
+cosmic workflows executions <executionId>    # Get specific execution
+cosmic workflows exec <executionId>          # Alias
+```
+
+**Options (for listing):**
+| Option | Description |
+|--------|-------------|
+| `-w, --workflow-id <id>` | Filter by workflow ID |
+| `-s, --status <status>` | Filter by status |
+| `-l, --limit <n>` | Limit results (default: 20) |
+| `--json` | Output as JSON |
+
+### `cosmic workflows cancel`
+
+Cancel a running execution.
+
+```bash
+cosmic workflows cancel <executionId>
+```
+
+---
+
+## Agents
+
+### `cosmic agents list`
+
+List agents in current bucket.
+
+```bash
+cosmic agents list
+cosmic agents ls                             # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic agents get`
+
+Get agent details.
+
+```bash
+cosmic agents get <id>
+cosmic agents get <id> --json
+```
+
+### `cosmic agents create`
+
+Create a new agent.
+
+```bash
+cosmic agents create --type content
+cosmic agents add --type repo                # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-t, --type <type>` | **Required.** Agent type: `content`, `repository` (or `code`/`repo`), `computer_use` |
+| `-n, --name <name>` | Agent name |
+| `-p, --prompt <prompt>` | Agent prompt/instructions |
+| `-m, --model <model>` | AI model (default: opus-4.5 for content/repo, haiku-4.5 for computer_use) |
+| `-e, --emoji <emoji>` | Agent emoji |
+| `--repository-id <id>` | Repository ID (for repository type) |
+| `--base-branch <branch>` | Base branch (for repository type) |
+| `--start-url <url>` | Start URL (for computer_use type) |
+| `--goal <goal>` | Goal description (for computer_use type) |
+| `--auth-session <id>` | Pre-captured auth session ID (for computer_use type) |
+| `--types <types>` | Object type slugs for context (comma-separated) |
+| `-l, --links <urls>` | External URLs for context (comma-separated) |
+| `--objects-limit <n>` | Max objects per type for context (default: 100) |
+| `--objects-depth <n>` | Object depth for nested metafields (default: 1) |
+| `--email-notifications` | Enable email notifications |
+| `--require-approval` | Require approval before execution |
+| `--schedule` | Enable scheduled runs |
+| `--schedule-type <type>` | `once` or `recurring` (default: recurring) |
+| `--schedule-frequency <freq>` | `hourly`, `daily`, `weekly`, `monthly` (default: daily) |
+| `--timezone <tz>` | Timezone for schedule (default: UTC) |
+| `--run` | Run immediately after creation |
+| `--json` | Output as JSON |
+
+### `cosmic agents run`
+
+Run an agent.
+
+```bash
+cosmic agents run <id>
+cosmic agents run <id> --prompt "Override prompt"
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-p, --prompt <prompt>` | Override the agent's prompt |
+| `--json` | Output as JSON |
+
+### `cosmic agents follow-up`
+
+Add a follow-up task to continue work on the same branch.
+
+```bash
+cosmic agents follow-up <agentId>
+cosmic agents followup <agentId>             # Alias
+cosmic agents follow-up <agentId> --prompt "Continue with..."
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-p, --prompt <prompt>` | Follow-up instructions |
+| `--json` | Output as JSON |
+
+### `cosmic agents pr`
+
+Create a pull request from agent's work.
+
+```bash
+cosmic agents pr <agentId>
+cosmic agents pull-request <agentId>         # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-t, --title <title>` | PR title |
+| `-b, --body <body>` | PR description |
+| `--json` | Output as JSON |
+
+### `cosmic agents approve`
+
+Approve and execute pending operations for an execution.
+
+```bash
+cosmic agents approve <agentId> <executionId>
+cosmic agents approve <agentId> <execId> --all    # Approve without confirmation
+cosmic agents approve <agentId> <execId> --skip   # Skip and mark complete
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-y, --all` | Approve all operations without confirmation |
+| `--skip` | Skip operations and mark execution as complete |
+| `--json` | Output as JSON |
+
+### `cosmic agents delete`
+
+Delete an agent.
+
+```bash
+cosmic agents delete <id>
+cosmic agents rm <id>                        # Alias
+cosmic agents delete <id> --force            # Skip confirmation
+```
+
+### `cosmic agents executions`
+
+List or get agent execution details.
+
+```bash
+cosmic agents executions <agentId>                    # List executions
+cosmic agents executions <agentId> <executionId>      # Get specific
+cosmic agents exec <agentId> <execId>                 # Alias
+cosmic agents executions <agentId> <execId> --watch   # Poll until complete
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-w, --watch` | Watch execution and poll until complete |
+| `--json` | Output as JSON |
+
+### `cosmic agents capture-auth`
+
+Capture authentication from local browser for computer use agents.
+
+```bash
+cosmic agents capture-auth --url https://example.com/login
+```
+
+Opens a browser window. Log in to the site, then click "Done - Capture Auth" in the banner. Returns a session ID to use with `--auth-session` when creating agents.
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-u, --url <url>` | **Required.** URL to authenticate on |
+| `-l, --label <label>` | Label for this auth session |
+| `--timeout <seconds>` | Timeout in seconds (default: 600) |
+| `--json` | Output as JSON |
+
+---
+
+## AI Generation
+
+### `cosmic ai generate`
+
+Generate text from a prompt with streaming output.
+
+```bash
+cosmic ai generate "Write a blog post about AI"
+cosmic ai gen "Your prompt"                  # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <model>` | AI model to use |
+| `--max-tokens <n>` | Maximum tokens to generate |
+| `--temperature <n>` | Temperature (0-2) |
+| `--json` | Output as JSON |
+
+### `cosmic ai image`
+
+Generate an image from a prompt.
+
+```bash
+cosmic ai image "A sunset over mountains"
+cosmic ai img "Your prompt"                  # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --folder <folder>` | Target folder in media library |
+| `-a, --alt-text <text>` | Alt text for the image |
+| `--json` | Output as JSON |
+
+### `cosmic ai chat`
+
+Send a single message to AI.
+
+```bash
+cosmic ai chat "Tell me about my content"
+cosmic ai chat "Explain this" --system "You are a helpful assistant"
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <model>` | AI model to use |
+| `-s, --system <prompt>` | System prompt |
+| `--json` | Output as JSON |
+
+---
+
+## Interactive Chat
+
+### `cosmic chat`
+
+Start interactive AI chat session.
+
+```bash
+cosmic chat                    # Default ask mode (read-only)
+cosmic chat --content          # Content mode (can modify content)
+cosmic chat --build            # Build mode (generate apps)
+cosmic chat --repo             # Repository mode (code changes)
+cosmic chat --repo my-repo     # Repo mode with specific repo
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <model>` | AI model to use |
+| `--ask` | Ask mode - read-only questions |
+| `-c, --content` | Content mode - create/update content |
+| `-b, --build` | Build mode - app development |
+| `-r, --repo [name]` | Repository mode - code changes |
+| `--branch <branch>` | Branch to use in repo mode |
+| `-p, --prompt <prompt>` | Start with initial prompt |
+| `-t, --types <types>` | Object type slugs to include (comma-separated) |
+| `-l, --links <urls>` | External URLs to include (comma-separated) |
+| `--objects-limit <n>` | Max objects per type (default: 10 content, 100 build) |
+| `--objects-depth <n>` | Object depth for nested metafields (default: 1) |
+
+### Chat Commands
+
+Inside chat mode:
+
+| Command | Description |
+|---------|-------------|
+| `exit`, `quit` | Exit chat mode |
+| `clear` | Clear conversation history |
+| `context` | Show current context |
+| `help` | Show available commands |
+
+---
+
+## Shortcut Commands
+
+### `cosmic content`
+
+Shortcut for content mode chat.
+
+```bash
+cosmic content                               # Start content chat
+cosmic content -p "Create 5 blog posts"      # With initial prompt
+cosmic content --types posts,authors         # Include object types
+cosmic content --ask                         # Read-only mode
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <model>` | AI model to use |
+| `-p, --prompt <prompt>` | Initial prompt |
+| `-a, --ask` | Ask mode (read-only) |
+| `-t, --types <types>` | Object types to include |
+| `-l, --links <urls>` | External URLs to include |
+| `--objects-limit <n>` | Max objects per type |
+| `--objects-depth <n>` | Nested metafield depth |
+
+### `cosmic build`
+
+Shortcut for build mode chat.
+
+```bash
+cosmic build                                 # Start build chat
+cosmic build -p "A blog with dark mode"      # With description
+cosmic build --types posts                   # Include content context
+cosmic build --ask                           # Ask without generating
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <model>` | AI model to use |
+| `-p, --prompt <prompt>` | App description |
+| `-a, --ask` | Ask mode (questions only) |
+| `-t, --types <types>` | Object types to include |
+| `-l, --links <urls>` | External URLs to include |
+| `--objects-limit <n>` | Max objects per type |
+| `--objects-depth <n>` | Nested metafield depth |
+
+### `cosmic update`
+
+Shortcut for repository update mode.
+
+```bash
+cosmic update                                # Select repo interactively
+cosmic update my-repo                        # Specify repo name
+cosmic update my-repo -b feature-branch      # Specify branch
+cosmic update -p "Add dark mode support"     # With instructions
+cosmic update --ask                          # Explore code without changes
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <model>` | AI model to use |
+| `-b, --branch <branch>` | Branch to update (default: main) |
+| `-p, --prompt <prompt>` | Change description |
+| `-a, --ask` | Ask mode (explore only) |
+| `-t, --types <types>` | Object types to include |
+| `-l, --links <urls>` | External URLs to include |
+| `--objects-limit <n>` | Max objects per type |
+| `--objects-depth <n>` | Nested metafield depth |
+
+---
+
+## Configuration
+
+### `cosmic config get`
+
+Get configuration values.
+
+```bash
+cosmic config get                            # Show all config
+cosmic config get defaultModel               # Get specific value
+```
+
+### `cosmic config set`
+
+Set configuration values.
+
+```bash
+cosmic config set defaultModel gpt-5
+cosmic config set apiUrl https://custom-api.example.com
+cosmic config set sdkUrl http://localhost:8080/v3
+```
+
+### Configuration Options
+
+| Option | Description |
+|--------|-------------|
+| `defaultModel` | Default AI model for generation |
+| `apiUrl` | Custom API URL |
+| `sdkUrl` | Custom SDK URL (for local development) |
+| `currentWorkspace` | Current workspace slug |
+| `currentProject` | Current project slug |
+| `currentBucket` | Current bucket slug |
+
+### Configuration Files
+
+Configuration is stored in `~/.cosmic/`:
+
+| File | Contents |
+|------|----------|
+| `config.json` | Settings (context, default model, etc.) |
+| `credentials.json` | Authentication tokens |
+
+---
+
+## Command Aliases
+
+Many commands have short aliases for convenience:
+
+| Command | Aliases |
+|---------|---------|
+| `list` | `ls` |
+| `delete` | `rm` |
+| `create` | `add` |
+| `workflows` | `wf` |
+| `repositories` | `repos` |
+| `executions` | `exec` |
+| `generate` | `gen` |
+| `image` | `img` |
+| `follow-up` | `followup` |
+| `pr` | `pull-request` |
+
+### Agent Type Aliases
+
+| Type | Aliases |
+|------|---------|
+| `repository` | `code`, `repo` |
+
+---
+
+## Examples
+
+### Complete App Workflow
+
+```bash
+# 1. Build an app
+cosmic build -p "A recipe blog with categories and search"
+
+# 2. Connect the generated repo
+cosmic repos connect --url https://github.com/myuser/recipe-blog
+
+# 3. Deploy to Vercel
+cosmic deploy start <repoId> --watch
+
+# 4. Later, update the app
+cosmic update recipe-blog -p "Add a favorites feature"
+
+# 5. Create PR for the changes
+cosmic agents pr <agentId>
+```
+
+### Automated Content Pipeline
+
+```bash
+# Create agents
+cosmic agents create --type content --name "Writer" \
+  --prompt "Write engaging blog posts" --run
+
+cosmic agents create --type content --name "Editor" \
+  --prompt "Edit and improve blog posts"
+
+# Create workflow
+cosmic workflows create --name "Content Pipeline" --agent <writerId>
+cosmic workflows add-step <workflowId> --agent <editorId>
+
+# Execute
+cosmic workflows run <workflowId>
+```
+
+### Computer Use with Auth
+
+```bash
+# Capture auth session
+cosmic agents capture-auth --url https://dashboard.example.com/login
+
+# Create agent with auth
+cosmic agents create \
+  --type computer_use \
+  --name "Dashboard Bot" \
+  --start-url "https://dashboard.example.com" \
+  --prompt "Screenshot the weekly metrics and summarize them" \
+  --auth-session <sessionId> \
+  --schedule \
+  --schedule-frequency daily
+
+# Check executions
+cosmic agents executions <agentId> --watch
+```
