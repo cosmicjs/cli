@@ -36,8 +36,11 @@ import {
   getObjectTypesWithMetafields,
   searchObjects,
   uploadMedia,
+  getRepositoryEnvVars,
+  addRepositoryEnvVar,
   type DeploymentLog,
 } from '../api/dashboard.js';
+import { extractEnvVarsFromContent } from '../utils/envVars.js';
 import * as api from '../api/dashboard.js';
 import * as display from '../utils/display.js';
 import {
@@ -4556,6 +4559,123 @@ async function processMessage(
             }
             console.log(chalk.dim('  Could not check deployment status. Changes were pushed to the repository.'));
             keepFixing = false;
+          }
+        }
+
+        // Check for environment variables that need to be configured
+        const detectedEnvVars = extractEnvVarsFromContent(fullText);
+        if (detectedEnvVars.length > 0) {
+          console.log();
+          console.log(chalk.yellow(`  🔧 Detected ${detectedEnvVars.length} environment variable(s) that may need to be configured:`));
+          console.log();
+
+          try {
+            // Check which env vars already exist
+            const existingEnvVars = await getRepositoryEnvVars(bucketSlug, currentRepo.id);
+            const existingKeys = existingEnvVars.map((v) => v.key);
+
+            // Filter out existing ones
+            const newEnvVars = detectedEnvVars.filter((v) => !existingKeys.includes(v.key));
+
+            if (newEnvVars.length === 0) {
+              console.log(chalk.green('  ✓ All detected environment variables are already configured'));
+            } else {
+              // Display new env vars
+              newEnvVars.forEach((envVar, idx) => {
+                console.log(chalk.cyan(`  ${idx + 1}. ${envVar.key}`));
+                console.log(chalk.dim(`     ${envVar.description}`));
+                // Show placeholder value (don't show actual sensitive values)
+                const displayValue = envVar.value.includes('your_') || envVar.value.includes('your-')
+                  ? envVar.value
+                  : '<needs to be set>';
+                console.log(chalk.dim(`     Current: ${displayValue}`));
+                console.log();
+              });
+
+              const addEnvVarsInput = await sharedAskLine!(chalk.yellow('  Would you like to add these environment variables? [Y/n]: '));
+
+              if (addEnvVarsInput.toLowerCase() !== 'n') {
+                console.log();
+
+                // Prompt for each env var value
+                const envVarsToAdd: Array<{ key: string; value: string }> = [];
+
+                for (const envVar of newEnvVars) {
+                  const defaultValue = envVar.value.includes('your_') || envVar.value.includes('your-')
+                    ? ''
+                    : envVar.value;
+
+                  const valueInput = await sharedAskLine!(
+                    chalk.cyan(`  Enter value for ${envVar.key}${defaultValue ? ` [${defaultValue}]` : ''}: `)
+                  );
+
+                  const finalValue = valueInput.trim() || defaultValue;
+
+                  if (finalValue) {
+                    envVarsToAdd.push({ key: envVar.key, value: finalValue });
+                  } else {
+                    console.log(chalk.dim(`  Skipping ${envVar.key} (no value provided)`));
+                  }
+                }
+
+                if (envVarsToAdd.length > 0) {
+                  console.log();
+                  console.log(chalk.cyan('  Adding environment variables...'));
+
+                  // Add each env var
+                  for (const envVar of envVarsToAdd) {
+                    try {
+                      await addRepositoryEnvVar(bucketSlug, currentRepo.id, {
+                        key: envVar.key,
+                        value: envVar.value,
+                        target: ['production', 'preview', 'development'],
+                        type: 'encrypted',
+                      });
+                      console.log(chalk.green(`  ✓ Added ${envVar.key}`));
+                    } catch (error) {
+                      console.log(chalk.red(`  ✗ Failed to add ${envVar.key}: ${(error as Error).message}`));
+                    }
+                  }
+
+                  console.log();
+                  console.log(chalk.green('  ✓ Environment variables added successfully'));
+                  console.log(chalk.yellow('  ⚠ Note: A redeploy is needed for the changes to take effect'));
+
+                  // Offer to trigger a redeploy
+                  const redeployInput = await sharedAskLine!(chalk.yellow('  Would you like to trigger a redeploy now? [Y/n]: '));
+
+                  if (redeployInput.toLowerCase() !== 'n') {
+                    console.log();
+                    console.log(chalk.cyan('  Triggering redeploy...'));
+
+                    try {
+                      await deployRepository(bucketSlug, currentRepo.id);
+                      console.log(chalk.green('  ✓ Redeploy triggered!'));
+                      console.log(chalk.dim('  The site will be updated shortly.'));
+
+                      // Poll for deployment status
+                      console.log();
+                      console.log(chalk.yellow('  Waiting for deployment...'));
+                      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+                      await pollDeploymentStatus(
+                        bucketSlug,
+                        currentRepo.name,
+                        `https://github.com/${currentRepo.owner}/${currentRepo.name}`
+                      );
+                    } catch (deployError) {
+                      console.log(chalk.red(`  ✗ Failed to trigger redeploy: ${(deployError as Error).message}`));
+                    }
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            if (verbose) {
+              console.log(chalk.dim(`  [DEBUG] Env var check error: ${(error as Error).message}`));
+            }
+            // Don't block on env var errors - this is a nice-to-have feature
+            console.log(chalk.dim('  Could not check environment variables. You may need to configure them manually.'));
           }
         }
 

@@ -299,3 +299,51 @@ export async function reopenPullRequest(
   );
   return response.pull_request;
 }
+
+// ============================================================================
+// Environment Variables
+// ============================================================================
+
+export interface RepositoryEnvVar {
+  key: string;
+  value?: string;
+  type: 'encrypted' | 'plain';
+  target: string[];
+}
+
+export interface AddEnvVarData {
+  key: string;
+  value: string;
+  target: string[]; // ['production', 'preview', 'development']
+  type: 'encrypted' | 'plain';
+}
+
+/**
+ * Get environment variables for a repository
+ */
+export async function getRepositoryEnvVars(
+  bucketSlug: string,
+  repositoryId: string
+): Promise<RepositoryEnvVar[]> {
+  const response = await get<{ envs?: RepositoryEnvVar[]; env?: RepositoryEnvVar[] }>(
+    `/repositories/${repositoryId}/env`,
+    { bucketSlug }
+  );
+  return response.envs || response.env || [];
+}
+
+/**
+ * Add environment variable to a repository
+ */
+export async function addRepositoryEnvVar(
+  bucketSlug: string,
+  repositoryId: string,
+  data: AddEnvVarData
+): Promise<{ created: boolean }> {
+  const response = await post<{ created: boolean }>(
+    `/repositories/${repositoryId}/env`,
+    data,
+    { bucketSlug }
+  );
+  return response;
+}
