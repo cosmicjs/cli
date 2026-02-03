@@ -152,6 +152,13 @@ cosmic repos delete <id>                       # Disconnect repo
 cosmic repos branches <repoId> list            # List branches
 cosmic repos branches <repoId> create          # Create branch
 cosmic repos branches <repoId> delete <name>   # Delete branch
+
+# Pull request management
+cosmic repos pr list <repoId>                  # List pull requests
+cosmic repos pr get <repoId> <number>          # Get PR details
+cosmic repos pr create <repoId>                # Create pull request
+cosmic repos pr merge <repoId> <number>        # Merge pull request
+cosmic repos pr close <repoId> <number>        # Close pull request
 ```
 
 ### Deployments

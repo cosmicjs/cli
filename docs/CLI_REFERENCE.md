@@ -517,6 +517,130 @@ cosmic repos branches <repoId> rm <branchName>       # Alias
 cosmic repos branches <repoId> delete <name> --force # Skip confirmation
 ```
 
+### Pull Request Management
+
+#### `cosmic repos pr list <repoId>`
+
+List pull requests for a repository.
+
+```bash
+cosmic repos pr list <repoId>
+cosmic repos pr ls <repoId>                          # Alias
+cosmic repos pull-requests list <repoId>             # Full alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-s, --state <state>` | Filter by state: `open`, `closed`, `all` (default: `open`) |
+| `--base <branch>` | Filter by base branch |
+| `--head <branch>` | Filter by head branch |
+| `--json` | Output as JSON |
+
+**Examples:**
+```bash
+cosmic repos pr list repo-123                        # List open PRs
+cosmic repos pr list repo-123 --state all            # List all PRs
+cosmic repos pr list repo-123 --base main            # PRs targeting main
+```
+
+#### `cosmic repos pr get <repoId> <pull_number>`
+
+Get pull request details.
+
+```bash
+cosmic repos pr get <repoId> <pull_number>
+cosmic repos pr get repo-123 42 --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+#### `cosmic repos pr create <repoId>`
+
+Create a new pull request.
+
+```bash
+cosmic repos pr create <repoId>
+cosmic repos pr add <repoId>                         # Alias
+cosmic repos pr create <repoId> --head feature --base main
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-t, --title <title>` | Pull request title |
+| `-b, --body <body>` | Pull request description |
+| `--head <branch>` | Head branch (source, where changes are) |
+| `--base <branch>` | Base branch (target, where changes go) |
+| `--draft` | Create as draft PR |
+| `--json` | Output as JSON |
+
+**Examples:**
+```bash
+# Interactive mode
+cosmic repos pr create repo-123
+
+# With all options
+cosmic repos pr create repo-123 \
+  --title "Add new feature" \
+  --body "This PR adds..." \
+  --head feature-branch \
+  --base main
+
+# Create draft PR
+cosmic repos pr create repo-123 --draft
+```
+
+#### `cosmic repos pr merge <repoId> <pull_number>`
+
+Merge a pull request.
+
+```bash
+cosmic repos pr merge <repoId> <pull_number>
+cosmic repos pr merge repo-123 42
+cosmic repos pr merge repo-123 42 --method squash
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --method <method>` | Merge method: `merge`, `squash`, `rebase` (default: `merge`) |
+| `--title <title>` | Commit title for merge |
+| `--message <message>` | Commit message for merge |
+| `-f, --force` | Skip confirmation |
+
+**Examples:**
+```bash
+# Standard merge
+cosmic repos pr merge repo-123 42
+
+# Squash merge
+cosmic repos pr merge repo-123 42 --method squash
+
+# With custom commit message
+cosmic repos pr merge repo-123 42 \
+  --title "Feature: Add dark mode" \
+  --message "Adds dark mode support with theme toggle"
+```
+
+#### `cosmic repos pr close <repoId> <pull_number>`
+
+Close a pull request without merging.
+
+```bash
+cosmic repos pr close <repoId> <pull_number>
+cosmic repos pr close repo-123 42
+cosmic repos pr close repo-123 42 --force            # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
 ---
 
 ## Deployments

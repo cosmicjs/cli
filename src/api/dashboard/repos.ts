@@ -3,7 +3,7 @@
  * Repository operations and branch management
  */
 
-import { get, post, patch, del } from '../client.js';
+import { get, post, patch, put, del } from '../client.js';
 
 export interface Repository {
   id: string;
@@ -138,4 +138,164 @@ export async function deleteBranch(
     `/repositories/${repositoryId}/branches/${encodeURIComponent(branchName)}`,
     { bucketSlug }
   );
+}
+
+// ============================================================================
+// Pull Request Management
+// ============================================================================
+
+export interface PullRequest {
+  number: number;
+  title: string;
+  body?: string;
+  state: 'open' | 'closed';
+  head: {
+    ref: string;
+    sha: string;
+  };
+  base: {
+    ref: string;
+    sha: string;
+  };
+  user: {
+    login: string;
+    avatar_url?: string;
+  };
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+  merged_at?: string;
+  draft?: boolean;
+  mergeable?: boolean;
+  mergeable_state?: string;
+}
+
+export async function listPullRequests(
+  bucketSlug: string,
+  repositoryId: string,
+  options: {
+    state?: 'open' | 'closed' | 'all';
+    head?: string;
+    base?: string;
+    sort?: 'created' | 'updated' | 'popularity' | 'long-running';
+    direction?: 'asc' | 'desc';
+    per_page?: number;
+    page?: number;
+  } = {}
+): Promise<PullRequest[]> {
+  const params: Record<string, unknown> = {};
+  if (options.state) params.state = options.state;
+  if (options.head) params.head = options.head;
+  if (options.base) params.base = options.base;
+  if (options.sort) params.sort = options.sort;
+  if (options.direction) params.direction = options.direction;
+  if (options.per_page) params.per_page = options.per_page;
+  if (options.page) params.page = options.page;
+
+  const response = await get<{ pull_requests: PullRequest[] }>(
+    `/repositories/${repositoryId}/pull-requests`,
+    { bucketSlug, params }
+  );
+  return response.pull_requests || [];
+}
+
+export async function getPullRequest(
+  bucketSlug: string,
+  repositoryId: string,
+  pullNumber: number
+): Promise<PullRequest> {
+  const response = await get<{ pull_request: PullRequest }>(
+    `/repositories/${repositoryId}/pull-requests/${pullNumber}`,
+    { bucketSlug }
+  );
+  return response.pull_request;
+}
+
+export interface CreatePullRequestData {
+  title: string;
+  body?: string;
+  head: string;
+  base: string;
+  draft?: boolean;
+  maintainer_can_modify?: boolean;
+}
+
+export async function createPullRequest(
+  bucketSlug: string,
+  repositoryId: string,
+  data: CreatePullRequestData
+): Promise<PullRequest> {
+  const response = await post<{ pull_request: PullRequest }>(
+    `/repositories/${repositoryId}/pull-requests`,
+    data,
+    { bucketSlug }
+  );
+  return response.pull_request;
+}
+
+export interface MergePullRequestData {
+  commit_title?: string;
+  commit_message?: string;
+  merge_method?: 'merge' | 'squash' | 'rebase';
+}
+
+export async function mergePullRequest(
+  bucketSlug: string,
+  repositoryId: string,
+  pullNumber: number,
+  data: MergePullRequestData = {}
+): Promise<{ merged: boolean; message: string; sha?: string }> {
+  const response = await put<{ merge_result: { merged: boolean; message: string; sha?: string } }>(
+    `/repositories/${repositoryId}/pull-requests/${pullNumber}/merge`,
+    data,
+    { bucketSlug }
+  );
+  return response.merge_result;
+}
+
+export interface UpdatePullRequestData {
+  title?: string;
+  body?: string;
+  base?: string;
+  maintainer_can_modify?: boolean;
+}
+
+export async function updatePullRequest(
+  bucketSlug: string,
+  repositoryId: string,
+  pullNumber: number,
+  data: UpdatePullRequestData
+): Promise<PullRequest> {
+  const response = await patch<{ pull_request: PullRequest }>(
+    `/repositories/${repositoryId}/pull-requests/${pullNumber}`,
+    data,
+    { bucketSlug }
+  );
+  return response.pull_request;
+}
+
+export async function closePullRequest(
+  bucketSlug: string,
+  repositoryId: string,
+  pullNumber: number
+): Promise<PullRequest> {
+  const response = await put<{ pull_request: PullRequest }>(
+    `/repositories/${repositoryId}/pull-requests/${pullNumber}/close`,
+    {},
+    { bucketSlug }
+  );
+  return response.pull_request;
+}
+
+export async function reopenPullRequest(
+  bucketSlug: string,
+  repositoryId: string,
+  pullNumber: number
+): Promise<PullRequest> {
+  const response = await put<{ pull_request: PullRequest }>(
+    `/repositories/${repositoryId}/pull-requests/${pullNumber}/reopen`,
+    {},
+    { bucketSlug }
+  );
+  return response.pull_request;
 }

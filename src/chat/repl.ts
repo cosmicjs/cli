@@ -2193,7 +2193,9 @@ export async function startChat(options: ChatOptions): Promise<void> {
 
   // Handle readline close
   rl.on('close', () => {
-    console.error(chalk.red('\n[DEBUG] Readline closed unexpectedly'));
+    if (process.env.COSMIC_DEBUG) {
+      console.error(chalk.red('\n[DEBUG] Readline closed unexpectedly'));
+    }
     mainRl = null;
     sharedAskLine = null;
     if (pendingReject) {
@@ -2214,11 +2216,15 @@ export async function startChat(options: ChatOptions): Promise<void> {
 
   // Listen for process exit
   process.on('exit', (code) => {
-    console.error(chalk.dim(`\n[DEBUG] Process exit with code: ${code}`));
+    if (process.env.COSMIC_DEBUG) {
+      console.error(chalk.dim(`\n[DEBUG] Process exit with code: ${code}`));
+    }
   });
 
   process.on('beforeExit', (code) => {
-    console.error(chalk.dim(`\n[DEBUG] Process beforeExit with code: ${code}`));
+    if (process.env.COSMIC_DEBUG) {
+      console.error(chalk.dim(`\n[DEBUG] Process beforeExit with code: ${code}`));
+    }
   });
 
   // Handle SIGINT (Ctrl+C)

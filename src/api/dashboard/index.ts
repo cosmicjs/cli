@@ -98,9 +98,20 @@ export {
   listBranches,
   createBranch,
   deleteBranch,
+  listPullRequests,
+  getPullRequest,
+  createPullRequest,
+  mergePullRequest,
+  updatePullRequest,
+  closePullRequest,
+  reopenPullRequest,
   type Repository,
   type Branch,
   type CreateRepositoryData,
+  type PullRequest,
+  type CreatePullRequestData,
+  type MergePullRequestData,
+  type UpdatePullRequestData,
 } from './repos.js';
 
 // Deployments
