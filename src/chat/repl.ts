@@ -207,7 +207,7 @@ Please create a complete, production-ready application.`;
 }
 
 /**
- * Clean response text for display - removes METADATA markers and JSON code blocks
+ * Clean response text for display - removes METADATA markers, ACTION: commands, and JSON code blocks
  */
 function cleanResponseForDisplay(text: string): string {
   // Remove METADATA markers and everything after them (including JSON blocks)
@@ -226,11 +226,33 @@ function cleanResponseForDisplay(text: string): string {
     cleaned = cleaned.substring(0, partialMetadata);
   }
 
+  // Find ACTION: and truncate there (including partial ACTION during streaming)
+  const actionIndex = cleaned.indexOf('ACTION:');
+  if (actionIndex !== -1) {
+    cleaned = cleaned.substring(0, actionIndex);
+  }
+
+  // Handle partial ACTION (when streaming cuts off mid-word)
+  const partialActionPatterns = ['ACTIO', 'ACTI', 'ACT'];
+  for (const pattern of partialActionPatterns) {
+    // Only match at the end of the string (streaming partial)
+    if (cleaned.endsWith(pattern) || cleaned.endsWith('\n' + pattern) || cleaned.endsWith(' ' + pattern)) {
+      const patternIndex = cleaned.lastIndexOf(pattern);
+      if (patternIndex !== -1) {
+        cleaned = cleaned.substring(0, patternIndex);
+        break;
+      }
+    }
+  }
+
   // Clean up trailing whitespace and newlines
   cleaned = cleaned.trimEnd();
 
   // Remove excessive newlines (more than 2 consecutive)
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  // Also remove leading excessive whitespace/newlines (keep at most 1 leading newline)
+  cleaned = cleaned.replace(/^\n+/, '');
 
   return cleaned;
 }
@@ -2459,6 +2481,11 @@ Generate complete, realistic content that matches what the code expects.` }],
           }
         } catch (error) {
           skipConfirmations = false;
+          // Check for exit request from install_content_model
+          if ((error as Error).message === '__EXIT_REQUESTED__') {
+            rl.close();
+            return;
+          }
           console.error(chalk.red(`[DEBUG] Inner catch error: ${(error as Error).message}`));
           display.error((error as Error).message);
         }
@@ -3661,19 +3688,15 @@ async function executeAction(actionJson: string): Promise<string> {
           return chalk.dim('Cancelled.');
         }
 
-        const sdkClient = getSDKClient();
-        if (!sdkClient) {
-          return 'Error: SDK client not available.';
-        }
-
         const results: string[] = [];
         const createdObjectTypes: Map<string, Record<string, unknown>> = new Map();
         // Track created objects: both expected slug (from AI) and actual slug -> id
         const createdObjects: Map<string, string> = new Map(); // slug -> id mapping
         // Track which demo objects were successfully created with their details
-        const successfulObjects: Array<{ original: Record<string, unknown>; created: Record<string, unknown> }> = [];
+        // Using same structure as updateObjectReferences expects: { object, id, insertPayload }
+        const successfulObjects: Array<{ object: Record<string, unknown>; id: string; insertPayload: Record<string, unknown> }> = [];
 
-        // Step 1: Create all object types first (streaming output)
+        // Step 1: Create all object types first using Dashboard API (streaming output)
         console.log();
         console.log(chalk.cyan('  Creating object types...'));
         console.log();
@@ -3708,9 +3731,10 @@ async function executeAction(actionJson: string): Promise<string> {
               });
             }
 
-            const result = await sdkClient.objectTypes.insertOne(objectTypeData);
+            // Use Dashboard API instead of SDK
+            const typeResult = await createObjectType(bucketSlug, objectTypeData as Parameters<typeof createObjectType>[1]);
 
-            const typeAny = result.object_type as Record<string, unknown>;
+            const typeAny = typeResult as Record<string, unknown>;
             const slug = typeAny.slug as string;
             createdObjectTypes.set(slug, typeAny);
 
@@ -3737,7 +3761,7 @@ async function executeAction(actionJson: string): Promise<string> {
           console.log(chalk.red(`  ✗ ${typesFailed} failed`));
         }
 
-        // Step 2: Create demo objects if provided (streaming output)
+        // Step 2: Create demo objects if provided using Dashboard API (streaming output)
         if (demoObjects && demoObjects.length > 0) {
           console.log();
           console.log(chalk.cyan('  Creating demo content...'));
@@ -3777,36 +3801,140 @@ async function executeAction(actionJson: string): Promise<string> {
 
             try {
               // Process Unsplash URLs in thumbnail and metadata
-              const bucketSlugForUpload = getCurrentBucketSlug();
-              if (!bucketSlugForUpload) {
-                throw new Error('No bucket selected');
-              }
-              const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
-              await processUnsplashUrls(obj, bucketSlugForUpload, metafields);
+              const objectTypeMetafields = (objectType.metafields as Record<string, unknown>[]) || [];
+              await processUnsplashUrls(obj, bucketSlug, objectTypeMetafields);
 
-              // Build the object data
-              const insertPayload: Record<string, unknown> = {
+              // Build the object data for Dashboard API (with metafields array, not metadata object)
+              const insertPayload: {
+                title: string;
+                slug?: string;
+                type: string;
+                status?: string;
+                thumbnail?: string;
+                metafields?: Array<{
+                  id?: string;
+                  title?: string;
+                  key: string;
+                  type: string;
+                  value?: unknown;
+                  required?: boolean;
+                  object_type?: string;
+                }>;
+              } = {
                 type: typeSlug,
-                title: obj.title,
+                title: obj.title as string,
+                status: (obj.status as string) || 'published',
               };
 
-              if (obj.slug) insertPayload.slug = obj.slug;
-              if (obj.thumbnail) insertPayload.thumbnail = obj.thumbnail;
+              if (obj.slug) insertPayload.slug = obj.slug as string;
+              if (obj.thumbnail) insertPayload.thumbnail = obj.thumbnail as string;
 
-              // Process metadata - resolve object references
+              // Convert metadata object to metafields array (Dashboard API format)
               if (obj.metadata && typeof obj.metadata === 'object') {
-                const metadata = { ...(obj.metadata as Record<string, unknown>) };
+                const metadata = obj.metadata as Record<string, unknown>;
+                const metafieldsArray: Array<{
+                  id?: string;
+                  title?: string;
+                  key: string;
+                  type: string;
+                  value?: unknown;
+                  required?: boolean;
+                  object_type?: string;
+                }> = [];
 
-                // For now, we'll just use the metadata as-is
-                // Object references will be resolved by slug after all objects are created
-                insertPayload.metadata = metadata;
+                // Build a map of object type metafield definitions for type lookup
+                const typeMetafieldsMap = new Map<string, Record<string, unknown>>();
+                for (const mf of objectTypeMetafields) {
+                  typeMetafieldsMap.set(mf.key as string, mf);
+                }
+
+                for (const [key, value] of Object.entries(metadata)) {
+                  // Look up the field type from the object type definition
+                  const objectTypeMetafield = typeMetafieldsMap.get(key);
+                  let fieldType = 'text';
+                  let objectTypeRef: string | undefined;
+
+                  if (objectTypeMetafield) {
+                    fieldType = (objectTypeMetafield.type as string) || 'text';
+                    if (fieldType === 'object' || fieldType === 'objects') {
+                      objectTypeRef = objectTypeMetafield.object_type as string;
+                    }
+                  } else {
+                    // Fallback: guess type based on key name and value
+                    if (Array.isArray(value)) {
+                      if (key.includes('image') || key.includes('photo') || key.includes('gallery')) {
+                        fieldType = 'files';
+                      }
+                    } else if (key.includes('image') || key.includes('photo') || key.includes('thumbnail') || key.includes('featured')) {
+                      fieldType = 'file';
+                    } else if (key.includes('content') || key.includes('body') || key.includes('description')) {
+                      fieldType = 'html-textarea';
+                    } else if (key.includes('date')) {
+                      fieldType = 'date';
+                    } else if (typeof value === 'boolean') {
+                      fieldType = 'switch';
+                    }
+                  }
+
+                  const metafieldEntry: {
+                    id?: string;
+                    title?: string;
+                    key: string;
+                    type: string;
+                    value?: unknown;
+                    required?: boolean;
+                    object_type?: string;
+                  } = {
+                    key,
+                    type: fieldType,
+                    title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
+                    value,
+                    required: false,
+                  };
+
+                  if (objectTypeRef) {
+                    metafieldEntry.object_type = objectTypeRef;
+                  }
+
+                  metafieldsArray.push(metafieldEntry);
+                }
+
+                // Add IDs to metafields
+                const metafieldsWithIds = addIdsToMetafields(metafieldsArray as Record<string, unknown>[]);
+
+                // Process images in metafields
+                const processedMetafields = await processMetafieldImages(metafieldsWithIds, bucketSlug);
+
+                insertPayload.metafields = processedMetafields.map(mf => {
+                  const metafield = mf as Record<string, unknown>;
+                  const result: {
+                    id?: string;
+                    title?: string;
+                    key: string;
+                    type: string;
+                    value?: unknown;
+                    required?: boolean;
+                    object_type?: string;
+                  } = {
+                    id: metafield.id as string,
+                    title: metafield.title as string || (metafield.key as string).charAt(0).toUpperCase() + (metafield.key as string).slice(1).replace(/_/g, ' '),
+                    key: metafield.key as string,
+                    type: metafield.type as string,
+                    value: metafield.value,
+                    required: (metafield.required as boolean) || false,
+                  };
+                  if (metafield.object_type) {
+                    result.object_type = metafield.object_type as string;
+                  }
+                  return result;
+                });
               }
 
-              const result = await sdkClient.objects.insertOne(insertPayload);
-
-              const createdObj = result.object as Record<string, unknown>;
-              const actualSlug = createdObj.slug as string;
-              const id = createdObj.id as string;
+              // Use Dashboard API to create object with metafields
+              const createdObj = await createObjectWithMetafields(bucketSlug, insertPayload);
+              const createdObjAny = createdObj as Record<string, unknown>;
+              const actualSlug = createdObjAny.slug as string;
+              const id = createdObjAny.id as string;
 
               // Store for reference resolution - map multiple possible slugs to the ID
               createdObjects.set(actualSlug, id);
@@ -3823,13 +3951,13 @@ async function executeAction(actionJson: string): Promise<string> {
                 createdObjects.set(titleSlug, id);
               }
 
-              // Track for reference resolution
-              successfulObjects.push({ original: obj, created: createdObj });
+              // Track for reference resolution (using structure expected by updateObjectReferences)
+              successfulObjects.push({ object: insertPayload as Record<string, unknown>, id, insertPayload: insertPayload as Record<string, unknown> });
 
               // Clear line and show success
               process.stdout.write('\r' + ' '.repeat(60) + '\r');
-              console.log(chalk.green(`  ✓ ${createdObj.title} `) + chalk.dim(`(${typeSlug})`));
-              results.push(`Created object: ${createdObj.title}`);
+              console.log(chalk.green(`  ✓ ${createdObjAny.title} `) + chalk.dim(`(${typeSlug})`));
+              results.push(`Created object: ${createdObjAny.title}`);
               objectsCreated++;
             } catch (error) {
               // Clear line and show error
@@ -3850,151 +3978,50 @@ async function executeAction(actionJson: string): Promise<string> {
           }
 
           // Step 3: Resolve object references (update objects with proper IDs)
-          // This follows the same pattern as dashboard/autonomousAgent.service.js
+          // This follows the same pattern as installContentToCosmic
           if (successfulObjects.length > 0) {
-            const objectsWithRefs = successfulObjects.filter(({ original }) => {
-              const typeSlug = original.type as string;
-              const objectType = createdObjectTypes.get(typeSlug);
-              if (!objectType || !original.metadata) return false;
-              const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
-              return metafields.some((m) => m.type === 'object' || m.type === 'objects');
-            });
-
-            if (objectsWithRefs.length > 0) {
-              console.log();
-              console.log(chalk.cyan('  Resolving references...'));
-
-              // Cache for existing objects fetched by slug to avoid repeated fetches
-              const slugCache: Map<string, string | null> = new Map();
-
-              // Helper function to get an object ID from a slug
-              // First checks newly created objects, then fetches from API if not found
-              const getObjectIdFromSlug = async (slug: string): Promise<string | null> => {
-                // If already in our map of newly created objects, return that ID
-                if (createdObjects.has(slug)) {
-                  return createdObjects.get(slug) || null;
-                }
-
-                // If we've already looked up this slug, return from cache
-                if (slugCache.has(slug)) {
-                  return slugCache.get(slug) || null;
-                }
-
-                // Try to fetch the object by slug from the bucket
-                try {
-                  const result = await sdkClient.objects.find({
-                    type: { $exists: true },
-                    slug,
-                  }).limit(1);
-
-                  if (result?.objects && result.objects.length > 0) {
-                    const objectId = result.objects[0].id as string;
-                    slugCache.set(slug, objectId);
-                    return objectId;
-                  } else {
-                    slugCache.set(slug, null);
-                    return null;
-                  }
-                } catch (error) {
-                  slugCache.set(slug, null);
-                  return null;
-                }
-              };
-
-              let refsUpdated = 0;
-              for (const { original, created } of objectsWithRefs) {
-                const typeSlug = original.type as string;
-                const objectType = createdObjectTypes.get(typeSlug);
-
-                if (!objectType || !original.metadata) continue;
-
-                const metafields = (objectType.metafields as Record<string, unknown>[]) || [];
-                const refMetafields = metafields.filter(
-                  (m) => m.type === 'object' || m.type === 'objects'
-                );
-
-                if (refMetafields.length === 0) continue;
-
-                const metadata = original.metadata as Record<string, unknown>;
-                const updates: Record<string, unknown> = {};
-                let hasUpdates = false;
-
-                for (const metafield of refMetafields) {
-                  const key = metafield.key as string;
-                  const value = metadata[key];
-
-                  if (!value) continue;
-
-                  if (metafield.type === 'object' && typeof value === 'string') {
-                    // Single object reference - convert slug to ID
-                    // Check if already an ID (24-char hex string)
-                    if (/^[a-f0-9]{24}$/i.test(value)) {
-                      continue; // Already an ID, skip
-                    }
-                    const refId = await getObjectIdFromSlug(value);
-                    if (refId) {
-                      updates[key] = refId;
-                      hasUpdates = true;
-                    }
-                  } else if (metafield.type === 'objects' && Array.isArray(value)) {
-                    // Multiple object references - convert slugs to IDs
-                    const updatedValues: string[] = [];
-                    let arrayUpdated = false;
-
-                    for (const val of value) {
-                      if (typeof val === 'string') {
-                        // Check if already an ID (24-char hex string)
-                        if (/^[a-f0-9]{24}$/i.test(val)) {
-                          updatedValues.push(val); // Keep existing ID
-                        } else {
-                          // Looks like a slug, try to resolve it
-                          const objectId = await getObjectIdFromSlug(val);
-                          if (objectId) {
-                            updatedValues.push(objectId);
-                            arrayUpdated = true;
-                          } else {
-                            updatedValues.push(val); // Keep original if not found
-                          }
-                        }
-                      } else {
-                        updatedValues.push(val); // Keep original value
-                      }
-                    }
-
-                    if (arrayUpdated) {
-                      updates[key] = updatedValues;
-                      hasUpdates = true;
-                    }
-                  }
-                }
-
-                if (hasUpdates) {
-                  const objId = created.id as string;
-                  const objTitle = created.title as string;
-
-                  try {
-                    // Merge updates with existing metadata - don't replace entire metadata
-                    const currentMetadata = (created.metadata as Record<string, unknown>) || {};
-                    const mergedMetadata = { ...currentMetadata, ...updates };
-                    await sdkClient.objects.updateOne(objId, { metadata: mergedMetadata });
-                    refsUpdated++;
-                  } catch {
-                    console.log(chalk.yellow(`  ⚠ Could not update references for "${objTitle}"`));
-                  }
-                }
-              }
-
-              if (refsUpdated > 0) {
-                console.log(chalk.dim(`  ✓ Updated ${refsUpdated} reference${refsUpdated !== 1 ? 's' : ''}`));
-              }
-            }
+            await updateObjectReferences(bucketSlug, successfulObjects);
           }
         }
 
         console.log();
         const totalTypes = createdObjectTypes.size;
         const totalObjects = successfulObjects.length;
-        return `✓ Content model installed: ${totalTypes} object type${totalTypes !== 1 ? 's' : ''}${totalObjects > 0 ? `, ${totalObjects} object${totalObjects !== 1 ? 's' : ''}` : ''}`;
+        console.log(chalk.green(`✓ Content model installed: ${totalTypes} object type${totalTypes !== 1 ? 's' : ''}${totalObjects > 0 ? `, ${totalObjects} object${totalObjects !== 1 ? 's' : ''}` : ''}`));
+
+        // Show next steps prompt if content was added
+        if (totalTypes > 0 || totalObjects > 0) {
+          console.log();
+
+          const nextAction = await select<'build' | 'content' | 'exit'>({
+            message: 'What would you like to do next?',
+            choices: [
+              { name: 'build', message: 'Build and deploy an app' },
+              { name: 'content', message: 'Add more content' },
+              { name: 'exit', message: 'Exit' },
+            ],
+          });
+
+          if (nextAction === 'build') {
+            isBuildMode = true;
+            console.log();
+            console.log(chalk.green('  Switching to build mode...'));
+            console.log();
+            console.log(chalk.cyan('  Describe the app you\'d like to build:'));
+            console.log();
+            console.log(chalk.dim('  Tip: Include details like:'));
+            console.log(chalk.dim('    • Framework: Next.js, React, Vue, Astro'));
+            console.log(chalk.dim('    • Design: modern, minimal, bold, elegant'));
+            console.log(chalk.dim('    • Features: responsive, dark mode, animations'));
+            console.log();
+            return ''; // Return empty string - user will enter their build prompt next
+          } else if (nextAction === 'exit') {
+            return 'EXIT_REQUESTED'; // Special signal to exit
+          }
+          // 'content' - continue normally
+        }
+
+        return '';
       }
 
       case 'list_repositories': {
@@ -4561,14 +4588,13 @@ async function processMessage(
       } else {
         // Content mode and Ask mode: Use streaming dashboard chat
         // Convert messages to the format expected by streamingChat
-        // Include the system prompt prepended to the first user message
-        const dashboardMessages = conversationHistory.map((msg, index) => ({
+        // NOTE: Do NOT prepend local system prompt - the Dashboard API applies the correct
+        // content-model system prompt (getContentModelPrompt) based on view_mode and chat_mode
+        const dashboardMessages = conversationHistory.map((msg) => ({
           role: msg.role as 'user' | 'assistant',
           content: [{
             type: 'text' as const,
-            text: index === 0 && msg.role === 'user'
-              ? systemPrompt + '\n\n' + msg.content
-              : msg.content
+            text: msg.content,
           }],
         }));
 
@@ -4578,19 +4604,29 @@ async function processMessage(
         let dotCount = 0;
         let loadingInterval: NodeJS.Timeout | null = null;
 
-        // Check if the user message suggests content model creation
+        // Check if the user message suggests content model creation or content actions
         const lastUserMessage = conversationHistory[conversationHistory.length - 1]?.content?.toLowerCase() || '';
+
+        // Detect content model creation
         const isLikelyContentModel = lastUserMessage.includes('content model') ||
           lastUserMessage.includes('object type') ||
           lastUserMessage.includes('install_content_model');
 
-        // Start loading indicator for likely content model requests
-        if (isLikelyContentModel) {
+        // Detect content CRUD operations (create, update, delete)
+        const isLikelyContentAction = /\b(create|add|new|update|edit|delete|remove)\b.*\b(post|blog|article|page|product|item|entry|content|object)\b/i.test(lastUserMessage) ||
+          /\b(post|blog|article|page|product|item|entry|content|object)\b.*\b(create|add|new|update|edit|delete|remove)\b/i.test(lastUserMessage);
+
+        // Combined detection for when to suppress streaming
+        const isLikelyActionResponse = isLikelyContentModel || isLikelyContentAction;
+
+        // Start loading indicator for content-related requests
+        if (isLikelyActionResponse) {
           console.log();
-          process.stdout.write(chalk.dim('  Generating content model'));
+          const loadingMessage = isLikelyContentModel ? 'Generating content model' : 'Processing';
+          process.stdout.write(chalk.dim(`  ${loadingMessage}`));
           loadingInterval = setInterval(() => {
             dotCount = (dotCount + 1) % 4;
-            process.stdout.write('\r' + chalk.dim('  Generating content model' + '.'.repeat(dotCount + 1).padEnd(4)));
+            process.stdout.write('\r' + chalk.dim(`  ${loadingMessage}` + '.'.repeat(dotCount + 1).padEnd(4)));
           }, 400);
         } else {
           console.log(); // New line before streaming output
@@ -4641,8 +4677,8 @@ async function processMessage(
               }
             }
 
-            // Skip streaming if in content model mode
-            if (isContentModelMode || isLikelyContentModel) {
+            // Skip streaming if in content model mode or likely action response
+            if (isContentModelMode || isLikelyActionResponse) {
               return;
             }
 
@@ -4675,12 +4711,15 @@ async function processMessage(
           messageId: result.messageId,
           usage: undefined,
           _alreadyStreamed: alreadyStreamedText || isContentModelMode,
+          _contentHandledViaMetadata: false, // Will be set below if metadata markers are processed
         };
         pendingMediaIds = []; // Clear after use
 
         // Check if AI response contains content to add to Cosmic CMS (metadata marker format)
         const extractedContent = extractContentFromResponse(fullText);
         if (extractedContent.hasAddContent && (extractedContent.objectTypes.length > 0 || extractedContent.demoObjects.length > 0)) {
+          // Mark that content was handled via metadata markers to skip ACTION processing
+          (response as any)._contentHandledViaMetadata = true;
           const contentResult = await installContentToCosmic(extractedContent, rl);
           if (contentResult.nextAction === 'build') {
             isBuildMode = true;
@@ -4756,9 +4795,13 @@ async function processMessage(
       let actionResults: string[] = [];
       let actionExecuted = false;
 
+      // Skip ACTION processing entirely in content mode - Dashboard API handles everything via metadata markers
+      // This prevents interference with the Dashboard's content model creation and image handling
+      const skipActionProcessing = isContentMode || (response as any)._contentHandledViaMetadata === true;
+
       // Find ACTION: in the response and extract the full JSON
       const actionIndex = response.text.indexOf('ACTION:');
-      if (actionIndex !== -1 && !actionExecuted) {
+      if (actionIndex !== -1 && !actionExecuted && !skipActionProcessing) {
         // Extract JSON starting after "ACTION:"
         const afterAction = response.text.substring(actionIndex + 7).trim();
 
@@ -4808,6 +4851,13 @@ async function processMessage(
           if (jsonEndIndex !== -1) {
             const actionJson = jsonStart.substring(0, jsonEndIndex);
             const result = await executeAction(actionJson);
+
+            // Check for exit signal from install_content_model
+            if (result === 'EXIT_REQUESTED') {
+              console.log(chalk.dim('  Goodbye!'));
+              throw new Error('__EXIT_REQUESTED__');
+            }
+
             actionResults.push(result);
             actionExecuted = true;
 

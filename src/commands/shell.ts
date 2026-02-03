@@ -210,12 +210,42 @@ function parseInput(input: string): string[] {
 async function startShell(): Promise<void> {
   printWelcome();
 
+  let isExiting = false;
+  let isProcessingCommand = false;
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: getPrompt(),
     historySize: 100,
+    terminal: true,
   });
+
+  // Helper to safely show prompt
+  const showPrompt = () => {
+    if (!isExiting && !isProcessingCommand) {
+      rl.setPrompt(getPrompt());
+      rl.prompt();
+    }
+  };
+
+  // Helper to execute commands with proper terminal handling
+  const runCommand = async (executor: () => Promise<void>) => {
+    isProcessingCommand = true;
+    // Pause readline to prevent input conflicts with subprocess
+    rl.pause();
+
+    try {
+      await executor();
+    } finally {
+      isProcessingCommand = false;
+      if (!isExiting) {
+        // Resume readline and refresh prompt
+        rl.resume();
+        showPrompt();
+      }
+    }
+  };
 
   rl.prompt();
 
@@ -223,22 +253,22 @@ async function startShell(): Promise<void> {
     const input = line.trim();
 
     if (!input) {
-      rl.setPrompt(getPrompt());
-      rl.prompt();
+      showPrompt();
       return;
     }
 
     // Handle built-in commands
-    if (input === 'exit' || input === 'quit') {
+    if (input === 'exit' || input === 'quit' || input === 'q') {
+      isExiting = true;
       console.log(chalk.dim('Goodbye!'));
       rl.close();
+      process.exit(0);
       return;
     }
 
     if (input === 'help') {
       printHelp();
-      rl.setPrompt(getPrompt());
-      rl.prompt();
+      showPrompt();
       return;
     }
 
@@ -246,10 +276,10 @@ async function startShell(): Promise<void> {
     if (input.startsWith('!')) {
       const systemCmd = input.slice(1).trim();
       if (systemCmd) {
-        await executeSystemCommand(systemCmd);
+        await runCommand(() => executeSystemCommand(systemCmd));
+      } else {
+        showPrompt();
       }
-      rl.setPrompt(getPrompt());
-      rl.prompt();
       return;
     }
 
@@ -257,24 +287,36 @@ async function startShell(): Promise<void> {
     const args = parseInput(input);
 
     if (args.length > 0) {
-      await executeCosmicCommand(args);
+      await runCommand(() => executeCosmicCommand(args));
+    } else {
+      showPrompt();
     }
-
-    // Update prompt (context may have changed)
-    rl.setPrompt(getPrompt());
-    rl.prompt();
   });
 
   rl.on('close', () => {
+    isExiting = true;
     process.exit(0);
   });
 
   // Handle Ctrl+C gracefully
   rl.on('SIGINT', () => {
+    if (isProcessingCommand) {
+      // Let the subprocess handle Ctrl+C
+      return;
+    }
     console.log();
     console.log(chalk.dim('(Use "exit" to quit)'));
-    rl.setPrompt(getPrompt());
-    rl.prompt();
+    showPrompt();
+  });
+
+  // Handle Ctrl+D (EOF)
+  process.stdin.on('end', () => {
+    if (!isExiting) {
+      isExiting = true;
+      console.log();
+      console.log(chalk.dim('Goodbye!'));
+      process.exit(0);
+    }
   });
 }
 
