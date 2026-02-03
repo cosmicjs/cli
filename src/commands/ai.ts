@@ -9,10 +9,10 @@ import { requireBucket } from '../config/context.js';
 import { getDefaultModel } from '../config/store.js';
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
-import * as api from '../api/dashboard.js';
+import { getSDKClient } from '../api/sdk.js';
 
 /**
- * Generate text
+ * Generate text using the Cosmic SDK with streaming output
  */
 async function generateText(
   prompt: string,
@@ -23,43 +23,101 @@ async function generateText(
     json?: boolean;
   }
 ): Promise<void> {
-  const bucketSlug = requireBucket();
+  requireBucket(); // Ensure bucket is configured
+
+  const sdk = getSDKClient();
+  if (!sdk) {
+    display.error('SDK not configured. Run "cosmic use" to configure bucket keys.');
+    process.exit(1);
+  }
+
   const model = options.model || getDefaultModel();
 
   try {
-    spinner.start(`Generating text with ${model}...`);
-
-    const response = await api.generateText(bucketSlug, {
+    // Use SDK streaming for real-time output
+    const stream = await sdk.ai.stream({
       prompt,
       model,
-      max_tokens: options.maxTokens ? parseInt(options.maxTokens, 10) : undefined,
-      temperature: options.temperature ? parseFloat(options.temperature) : undefined,
+      max_tokens: options.maxTokens ? parseInt(options.maxTokens, 10) : 4096,
     });
 
-    spinner.succeed();
+    let fullText = '';
+    let hasStarted = false;
+
+    // Use async iterator for streaming chunks
+    for await (const chunk of stream) {
+      // Handle different chunk formats
+      let text: string | undefined;
+
+      // Format 1: Anthropic-style content_block_delta
+      if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
+        text = chunk.delta.text;
+      }
+      // Format 2: SSE data with text property (SDK format)
+      else if (chunk.text) {
+        text = chunk.text;
+      }
+      // Format 3: Direct string chunk
+      else if (typeof chunk === 'string') {
+        text = chunk;
+      }
+
+      if (text) {
+        fullText += text;
+
+        // Skip leading whitespace
+        if (!hasStarted) {
+          const trimmed = text.replace(/^\s+/, '');
+          if (trimmed) {
+            hasStarted = true;
+            process.stdout.write(trimmed);
+          }
+        } else {
+          process.stdout.write(text);
+        }
+      }
+    }
+
+    // Add newline after streaming completes
+    console.log();
 
     if (options.json) {
-      display.json(response);
-      return;
+      display.json({ text: fullText });
+    }
+  } catch (error: unknown) {
+    display.newline();
+
+    // Better error handling for SDK errors
+    if (error instanceof Error) {
+      display.error(error.message);
+    } else if (typeof error === 'object' && error !== null) {
+      const errObj = error as { response?: { data?: { message?: string; error?: string } }; message?: string; error?: string };
+      const message = errObj.response?.data?.message || errObj.response?.data?.error || errObj.message || errObj.error || 'Unknown error';
+      display.error(message);
+    } else {
+      display.error(String(error));
     }
 
-    console.log(response.text);
-
-    if (response.usage) {
-      display.newline();
-      display.dim(
-        `Tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`
-      );
+    if (process.env.COSMIC_DEBUG === '1') {
+      // Safely log error without circular references
+      try {
+        const safeError = {
+          message: (error as Error)?.message,
+          name: (error as Error)?.name,
+          response: (error as { response?: { status?: number; data?: unknown } })?.response?.data,
+        };
+        console.log(chalk.dim('  [DEBUG] Error details:'), JSON.stringify(safeError, null, 2));
+      } catch {
+        console.log(chalk.dim('  [DEBUG] Error (non-serializable):'), (error as Error)?.message || 'Unknown');
+      }
     }
-  } catch (error) {
-    spinner.fail('Failed to generate text');
-    display.error((error as Error).message);
+
     process.exit(1);
   }
 }
 
 /**
- * Generate image
+ * Generate image using the Cosmic SDK
  */
 async function generateImage(
   prompt: string,
@@ -69,17 +127,26 @@ async function generateImage(
     json?: boolean;
   }
 ): Promise<void> {
-  const bucketSlug = requireBucket();
+  requireBucket(); // Ensure bucket is configured
+
+  const sdk = getSDKClient();
+  if (!sdk) {
+    display.error('SDK not configured. Run "cosmic use" to configure bucket keys.');
+    process.exit(1);
+  }
 
   try {
     spinner.start('Generating image...');
 
-    const media = await api.generateImage(bucketSlug, prompt, {
+    const result = await sdk.ai.generateImage({
+      prompt,
       folder: options.folder,
       alt_text: options.altText,
     });
 
     spinner.succeed('Image generated');
+
+    const media = result.media;
 
     if (options.json) {
       display.json(media);
@@ -95,15 +162,31 @@ async function generateImage(
     if (media.width && media.height) {
       display.keyValue('Dimensions', `${media.width} x ${media.height}`);
     }
-  } catch (error) {
+  } catch (error: unknown) {
     spinner.fail('Failed to generate image');
-    display.error((error as Error).message);
+
+    // Better error handling for SDK errors
+    if (error instanceof Error) {
+      display.error(error.message);
+    } else if (typeof error === 'object' && error !== null) {
+      // SDK might return axios errors with response data
+      const axiosError = error as { response?: { data?: { message?: string } }; message?: string };
+      const message = axiosError.response?.data?.message || axiosError.message || JSON.stringify(error);
+      display.error(message);
+    } else {
+      display.error(String(error));
+    }
+
+    if (process.env.COSMIC_DEBUG === '1') {
+      console.log(chalk.dim('  [DEBUG] Full error:'), error);
+    }
+
     process.exit(1);
   }
 }
 
 /**
- * Chat with AI (simple single-turn)
+ * Chat with AI using the Cosmic SDK with streaming
  */
 async function chat(
   message: string,
@@ -113,43 +196,109 @@ async function chat(
     json?: boolean;
   }
 ): Promise<void> {
-  const bucketSlug = requireBucket();
-  const model = options.model || getDefaultModel();
+  requireBucket(); // Ensure bucket is configured
 
-  const messages: api.AITextRequest['messages'] = [];
-
-  if (options.system) {
-    messages.push({ role: 'system', content: options.system });
+  const sdk = getSDKClient();
+  if (!sdk) {
+    display.error('SDK not configured. Run "cosmic use" to configure bucket keys.');
+    process.exit(1);
   }
 
-  messages.push({ role: 'user', content: message });
+  const model = options.model || getDefaultModel();
+
+  // Build messages array for SDK
+  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+  // Note: SDK doesn't support system role, so prepend to first user message if provided
+  let userMessage = message;
+  if (options.system) {
+    userMessage = `${options.system}\n\n${message}`;
+  }
+
+  messages.push({
+    role: 'user',
+    content: userMessage,
+  });
 
   try {
-    spinner.start(`Thinking...`);
-
-    const response = await api.generateText(bucketSlug, {
+    // Use SDK streaming for real-time output
+    const stream = await sdk.ai.stream({
       messages,
       model,
+      max_tokens: 4096,
     });
 
-    spinner.succeed();
+    let fullText = '';
+    let hasStarted = false;
+
+    // Use async iterator for streaming chunks
+    for await (const chunk of stream) {
+      // Handle different chunk formats
+      let text: string | undefined;
+
+      // Format 1: Anthropic-style content_block_delta
+      if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
+        text = chunk.delta.text;
+      }
+      // Format 2: SSE data with text property (SDK format)
+      else if (chunk.text) {
+        text = chunk.text;
+      }
+      // Format 3: Direct string chunk
+      else if (typeof chunk === 'string') {
+        text = chunk;
+      }
+
+      if (text) {
+        fullText += text;
+
+        // Skip leading whitespace
+        if (!hasStarted) {
+          const trimmed = text.replace(/^\s+/, '');
+          if (trimmed) {
+            hasStarted = true;
+            process.stdout.write(trimmed);
+          }
+        } else {
+          process.stdout.write(text);
+        }
+      }
+    }
+
+    // Add newline after streaming completes
+    console.log();
 
     if (options.json) {
-      display.json(response);
-      return;
+      display.json({ text: fullText });
+    }
+  } catch (error: unknown) {
+    display.newline();
+
+    // Better error handling for SDK errors
+    if (error instanceof Error) {
+      display.error(error.message);
+    } else if (typeof error === 'object' && error !== null) {
+      const errObj = error as { response?: { data?: { message?: string; error?: string } }; message?: string; error?: string };
+      const message = errObj.response?.data?.message || errObj.response?.data?.error || errObj.message || errObj.error || 'Unknown error';
+      display.error(message);
+    } else {
+      display.error(String(error));
     }
 
-    console.log(response.text);
-
-    if (response.usage) {
-      display.newline();
-      display.dim(
-        `Model: ${model} | Tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`
-      );
+    if (process.env.COSMIC_DEBUG === '1') {
+      // Safely log error without circular references
+      try {
+        const safeError = {
+          message: (error as Error)?.message,
+          name: (error as Error)?.name,
+          response: (error as { response?: { status?: number; data?: unknown } })?.response?.data,
+        };
+        console.log(chalk.dim('  [DEBUG] Error details:'), JSON.stringify(safeError, null, 2));
+      } catch {
+        console.log(chalk.dim('  [DEBUG] Error (non-serializable):'), (error as Error)?.message || 'Unknown');
+      }
     }
-  } catch (error) {
-    spinner.fail('Failed to get response');
-    display.error((error as Error).message);
+
     process.exit(1);
   }
 }

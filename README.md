@@ -9,6 +9,8 @@ AI-powered command-line interface for [Cosmic CMS](https://www.cosmicjs.com). Ma
 - **Multiple Auth Methods** - User login (JWT) or bucket keys
 - **Context Management** - Switch between workspaces, projects, and buckets
 - **AI Generation** - Generate text and images directly from the CLI
+- **AI Agents** - Content, repository, and computer use agents with scheduling
+- **Auth Capture** - Capture browser auth locally for computer use agents
 
 ## Installation
 
@@ -71,6 +73,66 @@ cosmic projects                     # List projects
 cosmic models                       # List available AI models
 ```
 
+### Navigation
+
+Navigate your Cosmic content like a filesystem:
+
+```bash
+cosmic pwd                    # Show current location
+cosmic ls                     # List contents at current level
+cosmic ls /                   # List all projects
+cosmic ls /project-id         # List buckets in project
+cosmic ls /project/bucket     # List object types in bucket
+cosmic cd project-id          # Navigate into a project
+cosmic cd bucket-slug         # Navigate into a bucket
+cosmic cd posts               # Navigate into an object type
+cosmic cd ..                  # Go up one level
+cosmic cd /                   # Go to root (home)
+```
+
+#### Navigation Hierarchy
+
+```
+/ (root)
+└── project-id/
+    └── bucket-slug/
+        └── object-type/
+            └── objects...
+```
+
+Example workflow:
+
+```bash
+$ cosmic ls
+    Projects
+    ────────────────────────────────────────────────────────
+    📁  my-project              My Project              3 buckets
+
+$ cosmic cd my-project
+  ✓ Now in Project: My Project
+
+$ cosmic ls
+    Buckets in My Project
+    ────────────────────────────────────────────────────────
+    📦  production
+        Production (42 objects)
+
+    📦  staging
+        Staging (15 objects)
+
+$ cosmic cd production
+  ✓ Now in Bucket: Production
+
+$ cosmic ls
+    Object Types in production
+    ────────────────────────────────────────────────────────
+    📄  posts                   Blog Posts              12 objects
+    📄  authors                 Authors                 3 objects
+
+$ cosmic cd ..
+  ✓ Now in Project: My Project
+```
+
 ### Objects
 
 ```bash
@@ -113,10 +175,84 @@ cosmic workflows cancel <id>               # Cancel execution
 ```bash
 cosmic agents list                   # List agents
 cosmic agents get <id>               # Get agent details
-cosmic agents create --type=content  # Create agent
+cosmic agents create --type=content  # Create content agent
 cosmic agents run <id>               # Run agent
 cosmic agents executions <agentId>   # List agent executions
+cosmic agents delete <id>            # Delete agent
 ```
+
+#### Agent Types
+
+- **content** - Creates and manages content in your bucket
+- **repository** - Makes code changes to connected repositories  
+- **computer_use** - Browser automation with AI vision
+
+#### Creating Agents
+
+```bash
+# Content agent
+cosmic agents create \
+  --type content \
+  --name "Blog Writer" \
+  --prompt "Write engaging blog posts about technology"
+
+# Repository agent (code changes)
+cosmic agents create \
+  --type repository \
+  --name "Bug Fixer" \
+  --prompt "Fix the bug described in the issue"
+
+# Computer use agent (browser automation)
+cosmic agents create \
+  --type computer_use \
+  --name "Web Scraper" \
+  --start-url "https://example.com" \
+  --prompt "Extract the main content from the page"
+```
+
+#### Scheduling Agents
+
+Run agents on a schedule:
+
+```bash
+cosmic agents create \
+  --type content \
+  --name "Daily News Digest" \
+  --prompt "Create a summary of today's tech news" \
+  --schedule \
+  --schedule-frequency daily \
+  --timezone "America/New_York"
+```
+
+Schedule options:
+- `--schedule` - Enable scheduling
+- `--schedule-type` - `once` or `recurring` (default: recurring)
+- `--schedule-frequency` - `hourly`, `daily`, `weekly`, `monthly`
+- `--timezone` - Timezone for schedule (default: UTC)
+
+### Auth Capture (for Computer Use Agents)
+
+Capture authentication from your local browser for use with computer use agents:
+
+```bash
+# Open browser, log in manually, then click "Done - Capture Auth"
+cosmic agents capture-auth --url https://example.com/login
+
+# Returns a session ID like: a1b2c3d4-5678-90ab-cdef-1234567890ab
+```
+
+Use the captured auth session when creating a computer use agent:
+
+```bash
+cosmic agents create \
+  --type computer_use \
+  --name "Dashboard Bot" \
+  --start-url "https://example.com/dashboard" \
+  --prompt "Check the analytics and report key metrics" \
+  --auth-session a1b2c3d4-5678-90ab-cdef-1234567890ab
+```
+
+This allows agents to access authenticated pages without handling login flows.
 
 ### AI Generation
 
@@ -161,6 +297,15 @@ $ cosmic
   ✓ Created post "Hello World" (draft)
 
 > exit
+```
+
+### Chat Modes
+
+```bash
+cosmic chat              # Default ask mode (read-only)
+cosmic chat --content    # Content mode (can create/update content)
+cosmic chat --build      # Build mode (for app development)
+cosmic chat --repo       # Repository mode (for code changes)
 ```
 
 ### Chat Commands
@@ -211,21 +356,47 @@ cosmic objects list --type=posts --status=published
 cosmic objects create --type=posts --title="My New Post" --status=draft
 
 # Update and publish
-cosmic objects update abc123 --content="Updated content"
+cosmic objects update abc123 --metadata '{"content":"Updated content"}'
 cosmic objects publish abc123
 ```
 
 ### Workflow Automation
 
 ```bash
-# List active workflows
-cosmic workflows list --status=active
+# Create a multi-step workflow
+cosmic workflows create --name "Content Pipeline" --agent writer-agent-id
+cosmic workflows add-step pipeline-id --agent editor-agent-id
+cosmic workflows add-step pipeline-id --agent publisher-agent-id
 
-# Run a workflow with inputs
-cosmic workflows run weekly-newsletter --inputs='{"topic":"AI updates"}'
+# Run a workflow
+cosmic workflows run pipeline-id
 
 # Check execution status
-cosmic workflows executions --workflow-id=abc123
+cosmic workflows executions pipeline-id
+```
+
+### Agent Automation
+
+```bash
+# Create a scheduled content agent
+cosmic agents create \
+  --type content \
+  --name "Weekly Roundup" \
+  --prompt "Create a weekly summary of new products" \
+  --schedule \
+  --schedule-frequency weekly
+
+# Create a computer use agent with pre-captured auth
+cosmic agents capture-auth --url https://analytics.example.com/login
+# (log in manually, click Done)
+# Session ID: abc123...
+
+cosmic agents create \
+  --type computer_use \
+  --name "Analytics Reporter" \
+  --start-url "https://analytics.example.com/dashboard" \
+  --prompt "Screenshot the weekly metrics and create a summary" \
+  --auth-session abc123...
 ```
 
 ### AI-Assisted Content

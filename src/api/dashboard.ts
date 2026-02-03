@@ -1019,12 +1019,33 @@ export async function generateImage(
   prompt: string,
   options: { folder?: string; alt_text?: string; metadata?: Record<string, unknown> } = {}
 ): Promise<Media> {
-  const response = await post<{ media: Media }>(
-    '/ai/generateImage',
-    { prompt, ...options },
-    { bucketSlug }
+  // Image generation uses the workers/API server with write_key auth
+  const workersUrl = getWorkersUrl();
+  const { getBucketKeys } = await import('../auth/manager.js');
+  const { writeKey } = getBucketKeys();
+
+  if (process.env.COSMIC_DEBUG === '1') {
+    console.log(`  [DEBUG] generateImage:`);
+    console.log(`    Workers URL: ${workersUrl}`);
+    console.log(`    Bucket: ${bucketSlug}`);
+    console.log(`    Write Key: ${writeKey ? writeKey.substring(0, 8) + '...' : 'NOT SET'}`);
+  }
+
+  if (!writeKey) {
+    throw new Error('Write key required for image generation. Run "cosmic use" to configure bucket keys.');
+  }
+
+  const response = await axios.post<{ media: Media }>(
+    `${workersUrl}/buckets/${bucketSlug}/ai/image`,
+    { prompt, write_key: writeKey, ...options },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
   );
-  return response.media;
+
+  return response.data.media;
 }
 
 // ============================================================================

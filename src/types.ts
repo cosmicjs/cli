@@ -270,9 +270,14 @@ export interface AITextRequest {
   stream?: boolean;
 }
 
+export interface AIMessageContent {
+  type: 'text';
+  text: string;
+}
+
 export interface AIMessage {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | AIMessageContent[];
 }
 
 export interface AITextResponse {

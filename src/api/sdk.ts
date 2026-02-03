@@ -12,7 +12,18 @@ type BucketClient = ReturnType<typeof createBucketClient>;
 // Cached SDK client instance
 let sdkClient: BucketClient | null = null;
 let currentBucketSlug: string | null = null;
-let currentSdkUrl: string | null = null;
+let currentCacheKey: string | null = null;
+
+// Default API URLs by environment
+const API_URLS = {
+  production: 'https://api.cosmicjs.com/v3',
+  staging: 'https://api.cosmic-staging.com/v3',
+};
+
+const UPLOAD_URLS = {
+  production: 'https://workers.cosmicjs.com/v3',
+  staging: 'https://workers.cosmic-staging.com/v3',
+};
 
 /**
  * Get the API environment (production or staging)
@@ -29,6 +40,7 @@ function getApiEnvironment(): 'production' | 'staging' {
 /**
  * Initialize or get the SDK client for a bucket
  * Uses apiEnvironment to determine the API endpoint (production or staging)
+ * If COSMIC_WORKERS_URL is set, uses it as the custom uploadUrl
  * See: https://www.cosmicjs.com/docs/api/object-types
  */
 export function getSDKClient(bucketSlug?: string): BucketClient | null {
@@ -40,31 +52,45 @@ export function getSDKClient(bucketSlug?: string): BucketClient | null {
     return null;
   }
 
-  // Get API environment
+  // Get API environment and custom workers URL
   const apiEnv = getApiEnvironment();
+  const customWorkersUrl = process.env.COSMIC_WORKERS_URL;
+  const cacheKey = `${apiEnv}:${customWorkersUrl || 'default'}`;
 
-  // Return cached client if same bucket and same environment
-  if (sdkClient && currentBucketSlug === slug && currentSdkUrl === apiEnv) {
+  // Return cached client if same bucket and same config
+  if (sdkClient && currentBucketSlug === slug && currentCacheKey === cacheKey) {
     return sdkClient;
   }
 
-  // Build SDK config - uses apiEnvironment to determine endpoint
+  // Build SDK config
   const sdkConfig: Parameters<typeof createBucketClient>[0] = {
     bucketSlug: slug,
     readKey: readKey || '',
     writeKey: writeKey || '',
-    apiEnvironment: apiEnv,
   };
 
-  if (process.env.COSMIC_DEBUG === '1') {
-    console.log(`  [DEBUG] SDK using apiEnvironment: ${apiEnv}`);
+  // If custom workers URL is set, use custom config
+  if (customWorkersUrl) {
+    sdkConfig.custom = {
+      apiUrl: API_URLS[apiEnv],
+      uploadUrl: customWorkersUrl,
+    };
+    if (process.env.COSMIC_DEBUG === '1') {
+      console.log(`  [DEBUG] SDK using apiEnvironment: ${apiEnv}`);
+      console.log(`  [DEBUG] SDK using custom uploadUrl: ${customWorkersUrl}`);
+    }
+  } else {
+    sdkConfig.apiEnvironment = apiEnv;
+    if (process.env.COSMIC_DEBUG === '1') {
+      console.log(`  [DEBUG] SDK using apiEnvironment: ${apiEnv}`);
+    }
   }
 
   // Create new client
   sdkClient = createBucketClient(sdkConfig);
   currentBucketSlug = slug;
-  currentSdkUrl = apiEnv;
-  
+  currentCacheKey = cacheKey;
+
   return sdkClient;
 }
 
@@ -84,20 +110,31 @@ export function initSDKClient(
   });
 
   const apiEnv = getApiEnvironment();
+  const customWorkersUrl = process.env.COSMIC_WORKERS_URL;
+  const cacheKey = `${apiEnv}:${customWorkersUrl || 'default'}`;
 
-  // Build SDK config - uses apiEnvironment to determine endpoint
+  // Build SDK config
   const sdkConfig: Parameters<typeof createBucketClient>[0] = {
     bucketSlug,
     readKey,
     writeKey,
-    apiEnvironment: apiEnv,
   };
+
+  // If custom workers URL is set, use custom config
+  if (customWorkersUrl) {
+    sdkConfig.custom = {
+      apiUrl: API_URLS[apiEnv],
+      uploadUrl: customWorkersUrl,
+    };
+  } else {
+    sdkConfig.apiEnvironment = apiEnv;
+  }
 
   // Create and cache client
   sdkClient = createBucketClient(sdkConfig);
   currentBucketSlug = bucketSlug;
-  currentSdkUrl = apiEnv;
-  
+  currentCacheKey = cacheKey;
+
   return sdkClient;
 }
 
