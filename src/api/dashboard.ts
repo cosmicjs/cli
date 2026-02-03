@@ -1244,6 +1244,75 @@ export async function createAgentPR(
 }
 
 // ============================================================================
+// Agent Operations (Pending Review)
+// ============================================================================
+
+export interface PendingOperation {
+  type: 'create' | 'edit';
+  data: Record<string, unknown>;
+  target_slug?: string;
+  target_id?: string;
+  detected_at: string;
+}
+
+export interface PendingEnvVar {
+  key: string;
+  value: string;
+  description: string;
+  required: boolean;
+  detected_at: string;
+}
+
+export interface PendingOperations {
+  object_types: PendingOperation[];
+  objects: PendingOperation[];
+  env_vars: PendingEnvVar[];
+}
+
+export async function getPendingOperations(
+  bucketSlug: string,
+  agentId: string,
+  executionId: string
+): Promise<PendingOperations> {
+  const response = await get<{ pending_operations: PendingOperations }>(
+    `/ai/agents/${agentId}/executions/${executionId}/pending-operations`,
+    { bucketSlug }
+  );
+  return response.pending_operations;
+}
+
+export async function executeOperations(
+  bucketSlug: string,
+  agentId: string,
+  executionId: string,
+  operations: {
+    object_types?: number[];
+    objects?: number[];
+    env_vars?: number[];
+  }
+): Promise<{ success: boolean; results?: unknown[] }> {
+  const response = await post<{ success: boolean; results?: unknown[] }>(
+    `/ai/agents/${agentId}/executions/${executionId}/execute-operations`,
+    { operations },
+    { bucketSlug }
+  );
+  return response;
+}
+
+export async function markExecutionComplete(
+  bucketSlug: string,
+  agentId: string,
+  executionId: string
+): Promise<AgentExecution> {
+  const response = await post<{ execution?: AgentExecution; data?: AgentExecution }>(
+    `/ai/agents/${agentId}/executions/${executionId}/complete`,
+    {},
+    { bucketSlug }
+  );
+  return response.execution || response.data || (response as unknown as AgentExecution);
+}
+
+// ============================================================================
 // AI Chat with Streaming (Dashboard API)
 // ============================================================================
 
@@ -1695,6 +1764,9 @@ export default {
   getAgentExecution,
   addAgentFollowUp,
   createAgentPR,
+  getPendingOperations,
+  executeOperations,
+  markExecutionComplete,
   // Repositories
   listRepositories,
   getRepository,

@@ -1,0 +1,32 @@
+---
+description: Always use bun instead of npm for package management
+alwaysApply: true
+---
+
+# Package Manager: Use Bun
+
+Always use `bun` instead of `npm` for all package management operations in this repository.
+
+## Commands
+
+- **Install packages**: `bun install` (not `npm install`)
+- **Add dependencies**: `bun add <package>` (not `npm install <package>`)
+- **Remove dependencies**: `bun remove <package>` (not `npm uninstall <package>`)
+- **Run scripts**: `bun run <script>` (not `npm run <script>`)
+- **Execute binaries**: `bun <command>` or `bunx <command>` (not `npx <command>`)
+
+## Examples
+
+```bash
+# ✅ GOOD
+bun install
+bun add chalk
+bun run build
+bun run dev
+
+# ❌ BAD
+npm install
+npm install chalk
+npm run build
+npm run dev
+```

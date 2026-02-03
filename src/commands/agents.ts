@@ -152,6 +152,30 @@ function buildAgentContext(options: {
 }
 
 /**
+ * Normalize agent type - accept aliases for convenience
+ */
+function normalizeAgentType(type: string): 'content' | 'repository' | 'computer_use' {
+  const normalized = type.toLowerCase().trim();
+
+  // Accept 'code', 'repo', or 'repository' as repository type
+  if (normalized === 'code' || normalized === 'repo' || normalized === 'repository') {
+    return 'repository';
+  }
+
+  if (normalized === 'content') {
+    return 'content';
+  }
+
+  if (normalized === 'computer_use') {
+    return 'computer_use';
+  }
+
+  // Invalid type - let it pass through and API will reject
+  display.error(`Invalid agent_type. Must be one of: content, repository (or code/repo), computer_use`);
+  process.exit(1);
+}
+
+/**
  * Create agent with interactive flow for repository agents
  */
 async function createAgent(options: {
@@ -175,7 +199,8 @@ async function createAgent(options: {
   objectsDepth?: string;
 }): Promise<void> {
   const bucketSlug = requireBucket();
-  const isRepository = options.type === 'repository';
+  const agentType = normalizeAgentType(options.type);
+  const isRepository = agentType === 'repository';
 
   // Get name if not provided
   const name =
@@ -254,7 +279,7 @@ async function createAgent(options: {
 
     const data: api.CreateAgentData = {
       agent_name: name,
-      agent_type: options.type as 'content' | 'repository' | 'computer_use',
+      agent_type: agentType,
       prompt,
       model: options.model,
       emoji: options.emoji || (isRepository ? '🔧' : '🤖'),
@@ -400,41 +425,111 @@ async function listAgentExecutions(
 }
 
 /**
- * Get agent execution details
+ * Check if execution status indicates it's still in progress
+ * Note: pending_review is NOT in progress - it's waiting for user action
+ */
+function isExecutionInProgress(status: string): boolean {
+  const inProgressStatuses = ['pending', 'working', 'running', 'queued', 'in_progress', 'active'];
+  return inProgressStatuses.includes(status?.toLowerCase());
+}
+
+/**
+ * Format elapsed time in human-readable format
+ */
+function formatElapsedTime(startTime: number): string {
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
+ * Display execution details
+ */
+function displayExecution(execution: any, agentId?: string): void {
+  display.header('Agent Execution');
+  display.keyValue('ID', execution.id);
+  display.keyValue('Agent ID', execution.agent_id || agentId);
+  display.keyValue('Status', display.formatStatus(execution.status));
+  display.keyValue('Started', display.formatDate(execution.started_at));
+  display.keyValue('Completed', display.formatDate(execution.completed_at));
+
+  if (execution.error) {
+    display.subheader('Error');
+    console.log(chalk.red(execution.error));
+  }
+
+  if (execution.output) {
+    display.subheader('Output');
+    display.json(execution.output);
+  }
+
+  // Show hint for pending_review status
+  if (execution.status === 'pending_review') {
+    display.newline();
+    display.info('This execution has pending operations that need approval.');
+    display.info(`Review and approve with: ${chalk.cyan(`cosmic agents approve ${execution.agent_id || agentId} ${execution.id}`)}`);
+  }
+}
+
+/**
+ * Get agent execution details with optional polling
  */
 async function getAgentExecution(
   agentId: string,
   executionId: string,
-  options: { json?: boolean }
+  options: { json?: boolean; watch?: boolean }
 ): Promise<void> {
   const bucketSlug = requireBucket();
+  const pollInterval = 3000; // 3 seconds
+  const startTime = Date.now();
 
   try {
     spinner.start('Loading execution...');
-    const execution = await api.getAgentExecution(bucketSlug, agentId, executionId);
-    spinner.succeed();
+    let execution = await api.getAgentExecution(bucketSlug, agentId, executionId);
+
+    // If not watching or execution is already complete, show result immediately
+    if (!options.watch || !isExecutionInProgress(execution.status)) {
+      spinner.succeed();
+
+      if (options.json) {
+        display.json(execution);
+        return;
+      }
+
+      displayExecution(execution, agentId);
+      return;
+    }
+
+    // Poll while execution is in progress
+    while (isExecutionInProgress(execution.status)) {
+      const elapsed = formatElapsedTime(startTime);
+      spinner.update(`Agent working... (${elapsed})`);
+
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      execution = await api.getAgentExecution(bucketSlug, agentId, executionId);
+    }
+
+    // Execution complete
+    const totalElapsed = formatElapsedTime(startTime);
+    if (execution.status === 'completed' || execution.status === 'success') {
+      spinner.succeed(`Execution completed (${totalElapsed})`);
+    } else if (execution.status === 'failed' || execution.status === 'error') {
+      spinner.fail(`Execution failed (${totalElapsed})`);
+    } else {
+      spinner.succeed(`Execution finished with status: ${execution.status} (${totalElapsed})`);
+    }
 
     if (options.json) {
       display.json(execution);
       return;
     }
 
-    display.header('Agent Execution');
-    display.keyValue('ID', execution.id);
-    display.keyValue('Agent ID', execution.agent_id);
-    display.keyValue('Status', display.formatStatus(execution.status));
-    display.keyValue('Started', display.formatDate(execution.started_at));
-    display.keyValue('Completed', display.formatDate(execution.completed_at));
-
-    if (execution.error) {
-      display.subheader('Error');
-      console.log(chalk.red(execution.error));
-    }
-
-    if (execution.output) {
-      display.subheader('Output');
-      display.json(execution.output);
-    }
+    displayExecution(execution, agentId);
   } catch (error) {
     spinner.fail('Failed to load execution');
     display.error((error as Error).message);
@@ -585,6 +680,124 @@ async function createPR(
 }
 
 /**
+ * Approve pending operations for an agent execution
+ */
+async function approveOperations(
+  agentId: string,
+  executionId: string,
+  options: { all?: boolean; skip?: boolean; json?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  try {
+    // Fetch execution to check status
+    spinner.start('Loading execution...');
+    const execution = await api.getAgentExecution(bucketSlug, agentId, executionId);
+    spinner.stop();
+
+    if (execution.status !== 'pending_review') {
+      display.error(`Execution is not pending review (status: ${execution.status})`);
+      process.exit(1);
+    }
+
+    // Fetch pending operations
+    spinner.start('Loading pending operations...');
+    const pendingOps = await api.getPendingOperations(bucketSlug, agentId, executionId);
+    spinner.stop();
+
+    const totalOps =
+      (pendingOps.objects?.length || 0) +
+      (pendingOps.object_types?.length || 0) +
+      (pendingOps.env_vars?.length || 0);
+
+    if (totalOps === 0) {
+      display.info('No pending operations to approve');
+
+      // Mark as complete since there's nothing to approve
+      spinner.start('Marking execution as complete...');
+      await api.markExecutionComplete(bucketSlug, agentId, executionId);
+      spinner.succeed('Execution marked as complete');
+      return;
+    }
+
+    // Display pending operations
+    display.header('Pending Operations');
+
+    if (pendingOps.object_types?.length > 0) {
+      display.subheader(`Object Types (${pendingOps.object_types.length})`);
+      for (const [index, op] of pendingOps.object_types.entries()) {
+        const title = (op.data as { title?: string })?.title || 'Untitled';
+        console.log(`  ${chalk.dim(`[${index}]`)} ${chalk.cyan(op.type)}: ${title}`);
+      }
+    }
+
+    if (pendingOps.objects?.length > 0) {
+      display.subheader(`Objects (${pendingOps.objects.length})`);
+      for (const [index, op] of pendingOps.objects.entries()) {
+        const title = (op.data as { title?: string })?.title || 'Untitled';
+        const type = (op.data as { type?: string })?.type || 'unknown';
+        console.log(`  ${chalk.dim(`[${index}]`)} ${chalk.cyan(op.type)}: ${title} (${type})`);
+      }
+    }
+
+    if (pendingOps.env_vars?.length > 0) {
+      display.subheader(`Environment Variables (${pendingOps.env_vars.length})`);
+      for (const [index, envVar] of pendingOps.env_vars.entries()) {
+        console.log(`  ${chalk.dim(`[${index}]`)} ${chalk.yellow(envVar.key)}: ${envVar.description}`);
+      }
+    }
+
+    display.newline();
+
+    // Skip if --skip flag
+    if (options.skip) {
+      spinner.start('Skipping operations and marking complete...');
+      await api.markExecutionComplete(bucketSlug, agentId, executionId);
+      spinner.succeed('Execution marked as complete (operations skipped)');
+      return;
+    }
+
+    // Confirm approval
+    let shouldApprove = options.all;
+    if (!shouldApprove) {
+      shouldApprove = await prompts.confirm({
+        message: `Approve all ${totalOps} operation(s)?`,
+        initial: true,
+      });
+    }
+
+    if (!shouldApprove) {
+      display.info('Cancelled');
+      return;
+    }
+
+    // Execute all operations
+    spinner.start('Executing operations...');
+    const operations = {
+      object_types: pendingOps.object_types?.map((_, i) => i),
+      objects: pendingOps.objects?.map((_, i) => i),
+      env_vars: pendingOps.env_vars?.map((_, i) => i),
+    };
+
+    const result = await api.executeOperations(bucketSlug, agentId, executionId, operations);
+    spinner.succeed(`Executed ${totalOps} operation(s)`);
+
+    if (options.json) {
+      display.json(result);
+      return;
+    }
+
+    display.newline();
+    display.success('All operations approved and executed');
+    display.info(`View execution: ${chalk.cyan(`cosmic agents executions ${agentId} ${executionId}`)}`);
+  } catch (error) {
+    spinner.fail('Failed to approve operations');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Create agents commands
  */
 export function createAgentsCommands(program: Command): void {
@@ -609,7 +822,7 @@ export function createAgentsCommands(program: Command): void {
     .command('create')
     .alias('add')
     .description('Create a new agent')
-    .requiredOption('-t, --type <type>', 'Agent type (content, repository, computer_use)')
+    .requiredOption('-t, --type <type>', 'Agent type (content, code/repo/repository, computer_use)')
     .option('-n, --name <name>', 'Agent name')
     .option('-p, --prompt <prompt>', 'Agent prompt')
     .option('-m, --model <model>', 'AI model to use')
@@ -653,6 +866,14 @@ export function createAgentsCommands(program: Command): void {
     .action(createPR);
 
   agentsCmd
+    .command('approve <agentId> <executionId>')
+    .description('Approve and execute pending operations for an execution')
+    .option('-y, --all', 'Approve all operations without confirmation')
+    .option('--skip', 'Skip operations and mark execution as complete')
+    .option('--json', 'Output as JSON')
+    .action(approveOperations);
+
+  agentsCmd
     .command('delete <id>')
     .alias('rm')
     .description('Delete an agent')
@@ -663,6 +884,7 @@ export function createAgentsCommands(program: Command): void {
     .command('executions <agentId> [executionId]')
     .alias('exec')
     .description('List or get agent execution details')
+    .option('-w, --watch', 'Watch execution and poll until complete')
     .option('--json', 'Output as JSON')
     .action((agentId, executionId, options) => {
       if (executionId) {

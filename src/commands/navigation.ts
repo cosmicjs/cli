@@ -253,7 +253,25 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
     console.log();
   } catch (error) {
     spinner.fail('Failed to load object types');
-    display.error((error as Error).message);
+    const errorMessage = (error as Error).message;
+    
+    // Check if the bucket was deleted
+    if (errorMessage.includes('not found') || errorMessage.includes('bucket with slug')) {
+      console.log();
+      console.log(chalk.yellow(`  ⚠ Bucket "${bucketSlug}" not found.`));
+      console.log(chalk.dim(`    This bucket may have been deleted or is no longer accessible.`));
+      console.log();
+      console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
+      console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
+      console.log();
+      
+      // Clear the bucket context
+      clearConfigValue('currentBucket');
+      clearConfigValue('currentObjectType');
+      clearCredentials();
+    } else {
+      display.error(errorMessage);
+    }
     process.exit(1);
   }
 }
@@ -299,7 +317,25 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
     console.log();
   } catch (error) {
     spinner.fail('Failed to load objects');
-    display.error((error as Error).message);
+    const errorMessage = (error as Error).message;
+    
+    // Check if the bucket was deleted
+    if (errorMessage.includes('not found') || errorMessage.includes('bucket with slug')) {
+      console.log();
+      console.log(chalk.yellow(`  ⚠ Bucket "${bucketSlug}" not found.`));
+      console.log(chalk.dim(`    This bucket may have been deleted or is no longer accessible.`));
+      console.log();
+      console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
+      console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
+      console.log();
+      
+      // Clear the bucket context
+      clearConfigValue('currentBucket');
+      clearConfigValue('currentObjectType');
+      clearCredentials();
+    } else {
+      display.error(errorMessage);
+    }
     process.exit(1);
   }
 }
@@ -338,10 +374,25 @@ async function cd(path?: string): Promise<void> {
         console.log();
         console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(currentProjectTitle)} / Bucket: ${chalk.bold(bucketTitle)}`));
         console.log();
-      } catch {
-        console.log();
-        console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(currentProjectTitle)} / Bucket: ${chalk.bold(currentBucket)}`));
-        console.log();
+      } catch (error) {
+        const errorMessage = (error as Error).message;
+        if (errorMessage.includes('not found') || errorMessage.includes('bucket with slug')) {
+          // Bucket was deleted - clear context and show helpful message
+          console.log();
+          console.log(chalk.yellow(`  ⚠ Bucket "${currentBucket}" not found.`));
+          console.log(chalk.dim(`    This bucket may have been deleted or is no longer accessible.`));
+          console.log();
+          clearConfigValue('currentBucket');
+          clearConfigValue('currentObjectType');
+          clearCredentials();
+          console.log(chalk.green(`  ✓ Cleared bucket context. Now in Project: ${chalk.bold(currentProjectTitle)}`));
+          console.log(chalk.dim(`    Run "ls" to see available buckets, or "cd <bucket-slug>" to select a bucket.`));
+          console.log();
+        } else {
+          console.log();
+          console.log(chalk.green(`  ✓ Now in Project: ${chalk.bold(currentProjectTitle)} / Bucket: ${chalk.bold(currentBucket)}`));
+          console.log();
+        }
       }
     } else if (currentBucket) {
       // In bucket, go up to project (or root if only one bucket)
@@ -587,7 +638,25 @@ async function cd(path?: string): Promise<void> {
       console.log();
     } catch (error) {
       spinner.fail('Not found');
-      display.error((error as Error).message);
+      const errorMessage = (error as Error).message;
+      
+      // Check if the bucket was deleted
+      if (errorMessage.includes('not found') || errorMessage.includes('bucket with slug')) {
+        console.log();
+        console.log(chalk.yellow(`  ⚠ Bucket "${currentBucket}" not found.`));
+        console.log(chalk.dim(`    This bucket may have been deleted or is no longer accessible.`));
+        console.log();
+        console.log(chalk.cyan(`  → Run ${chalk.bold('cosmic use <workspace>/<project>/<bucket>')} to set a new bucket.`));
+        console.log(chalk.dim(`    Or run ${chalk.bold('cosmic cd ..')} to navigate to the project level.`));
+        console.log();
+        
+        // Clear the bucket context
+        clearConfigValue('currentBucket');
+        clearConfigValue('currentObjectType');
+        clearCredentials();
+      } else {
+        display.error(errorMessage);
+      }
       process.exit(1);
     }
   } else {
