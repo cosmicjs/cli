@@ -63,21 +63,58 @@ export function extractAtPaths(input: string): string[] {
 /**
  * Detect file paths in input that might have been pasted (e.g. from drag-drop)
  * Returns { resolvedPath, originalSegment } for each found path
+ * Handles paths with:
+ * - Escaped spaces: /path\ with\ spaces/file.png
+ * - Special characters: @, #, etc.
+ * - Multiple directory levels
  */
 export function detectPastedPaths(input: string, cwd: string): Array<{ resolved: string; original: string }> {
   const result: Array<{ resolved: string; original: string }> = [];
-  // Match potential file paths: /path/to/file or ./path or path with extension
-  const pathPattern = /(\/[\w.-]+\/[\w./-]+\.(?:png|jpg|jpeg|gif|webp|heic|avif))|(\.\/[\w./-]+\.(?:png|jpg|jpeg|gif|webp|heic|avif))/gi;
+
+  // Match paths with escaped spaces and special chars
+  // Strategy: Match any character except unescaped whitespace
+  // (?:(?:\\ )|(?:[^\s\\])|(?:\\(?! )))+ means:
+  //   - \\ followed by space (escaped space as a unit)
+  //   - OR any char that's not whitespace or backslash  
+  //   - OR backslash not followed by space (for other escapes)
+  // This properly captures: /Users/Library/Application\ Support/file@2x.png
+  const pathPattern = /((?:\/|\.\/)(?:(?:\\ )|(?:[^\s\\])|(?:\\(?! )))+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif|heic|avif))/gi;
+
+  if (process.env.COSMIC_DEBUG) {
+    console.log('[DEBUG] detectPastedPaths: scanning input for image paths');
+    console.log(`[DEBUG] Input string: "${input}"`);
+    console.log(`[DEBUG] Input length: ${input.length} chars`);
+  }
+
   let match;
   while ((match = pathPattern.exec(input)) !== null) {
-    const original = (match[1] || match[2] || '').trim();
+    const original = match[1].trim();
     if (original) {
-      const resolved = isAbsolute(original) ? original : resolve(cwd, original);
+      // Unescape the path (remove backslashes before spaces)
+      const unescaped = original.replace(/\\ /g, ' ');
+      const resolved = isAbsolute(unescaped) ? unescaped : resolve(cwd, unescaped);
+
+      if (process.env.COSMIC_DEBUG) {
+        console.log(`[DEBUG] Found path: "${original}"`);
+        console.log(`[DEBUG] Unescaped: "${unescaped}"`);
+        console.log(`[DEBUG] Resolved: "${resolved}"`);
+        console.log(`[DEBUG] Exists: ${existsSync(resolved)}, IsImage: ${isImagePath(resolved)}`);
+      }
+
       if (existsSync(resolved) && isImagePath(resolved)) {
         result.push({ resolved, original });
+
+        if (process.env.COSMIC_DEBUG) {
+          console.log(`[DEBUG] ✓ Added to upload queue`);
+        }
       }
     }
   }
+
+  if (process.env.COSMIC_DEBUG) {
+    console.log(`[DEBUG] detectPastedPaths: found ${result.length} image(s)`);
+  }
+
   return result;
 }
 
@@ -92,6 +129,10 @@ export interface ExtractedMedia {
  * Get unique image paths from user input (combines @paths and detected paths)
  */
 export function extractImagePathsFromInput(input: string, cwd: string): ExtractedMedia {
+  if (process.env.COSMIC_DEBUG) {
+    console.log('[DEBUG] extractImagePathsFromInput called');
+  }
+
   const atPaths = extractAtPaths(input);
   const pastedPaths = detectPastedPaths(input, cwd);
 
@@ -114,6 +155,11 @@ export function extractImagePathsFromInput(input: string, cwd: string): Extracte
       paths.push(resolved);
       segmentsToStrip.push(original);
     }
+  }
+
+  if (process.env.COSMIC_DEBUG) {
+    console.log(`[DEBUG] extractImagePathsFromInput: ${paths.length} unique path(s) to upload`);
+    paths.forEach((p, i) => console.log(`[DEBUG]   ${i + 1}. ${p}`));
   }
 
   return { paths, segmentsToStrip };
