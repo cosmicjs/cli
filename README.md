@@ -1,6 +1,42 @@
 # Cosmic CLI
 
+[![npm version](https://img.shields.io/npm/v/@cosmicjs/cli.svg)](https://www.npmjs.com/package/@cosmicjs/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 AI-powered command-line interface for [Cosmic CMS](https://www.cosmicjs.com). Manage your content, media, repositories, deployments, workflows, and AI agents through natural language and direct commands.
+
+## Zero to Production in One Command
+
+```bash
+cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cosmic deploy start --watch
+# → Creates project, generates content model, builds Next.js app, deploys to Vercel
+```
+
+## Why Cosmic CLI?
+
+| Traditional Workflow | Cosmic CLI |
+|---------------------|------------|
+| Design content schema | `cosmic projects create` with AI |
+| Build CMS admin | Already done |
+| Write frontend code | `cosmic build -p "describe your app"` |
+| Configure hosting | Automatic Vercel integration |
+| Set up CI/CD | `cosmic update` + auto-deploy on PR |
+| **Hours of work** | **Minutes** |
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Authentication](#authentication)
+- [Interactive Shell](#interactive-shell)
+- [Core Commands](#core-commands)
+- [Shortcut Commands](#shortcut-commands)
+- [Interactive Chat Mode](#interactive-chat-mode)
+- [Configuration](#configuration)
+- [AI Models](#ai-models)
+- [Examples](#examples)
+- [Support](#support)
 
 ## Features
 
@@ -384,15 +420,24 @@ cosmic repos clone <repoName>                  # Clone with .env auto-configured
 cd recipe-blog && npm install && npm run dev   # Start local dev
 
 # 7. Make updates to the app
-cosmic update <repoName> -p "Add a favorites feature and dark mode"
-# AI makes changes to the code
+cosmic update -p "Add a favorites feature and dark mode" -b theme
+# AI makes changes to the code on branch theme
 
 # 8. Create a PR for the changes
-cosmic agents pr <agentId>
-# ✓ PR URL: https://github.com/user/recipe-blog/pull/1
+cosmic repos pr create <repoId>
+# ✓ Created pull request: #1
+#   Title: Add a favorites feature and dark mode
+#   Branch: theme → main
+#   URL: https://github.com/user/recipe-blog/pull/1
 
-# 9. Deploy the updates
-cosmic deploy start <repoId> --watch
+# 9. Wait for deployment to complete, type open to preview and review
+open
+# Opens preview deployment in browser
+
+# 10. Merge the PR
+cosmic repos pr merge <repoId> 1
+# Auto deploys to production. Type open again to view live.
+open
 ```
 
 ### Agent Workflow
