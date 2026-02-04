@@ -146,6 +146,9 @@ cosmic media delete <id>             # Delete media
 cosmic repos list                              # List connected repos
 cosmic repos get <id>                          # Get repo details
 cosmic repos connect --url <github-url>        # Connect a GitHub repo
+cosmic repos clone                             # Clone repo & create .env with Cosmic keys
+cosmic repos clone <repoId>                    # Clone specific repo
+cosmic repos clone <github-url>                # Clone from URL
 cosmic repos delete <id>                       # Disconnect repo
 
 # Branch management
@@ -334,6 +337,25 @@ cosmic ai generate --model=gpt-5 "Your prompt"
 
 ## Examples
 
+### Clone and Develop Locally
+
+```bash
+# Clone a connected repository with auto-configured .env
+cosmic repos clone                             # Interactive selection
+cosmic repos clone <repoId>                    # By repository ID
+cosmic repos clone https://github.com/user/repo  # By URL
+
+# The clone command:
+# - Clones the repo to a local directory
+# - Creates .env with COSMIC_BUCKET_SLUG, COSMIC_READ_KEY, COSMIC_WRITE_KEY
+# - Also adds NEXT_PUBLIC_ variants for Next.js apps
+
+# Start developing immediately
+cd my-repo
+npm install
+npm run dev
+```
+
 ### Build and Deploy an App (Full Walkthrough)
 
 ```bash
@@ -357,15 +379,19 @@ cosmic repos list                              # Find your repo ID
 cosmic deploy start <repoId> --watch           # Deploy and watch progress
 # ✓ Deployment ready: https://recipe-blog-abc123.vercel.app
 
-# 6. Make updates to the app
+# 6. Clone locally for development
+cosmic repos clone <repoName>                  # Clone with .env auto-configured
+cd recipe-blog && npm install && npm run dev   # Start local dev
+
+# 7. Make updates to the app
 cosmic update <repoName> -p "Add a favorites feature and dark mode"
 # AI makes changes to the code
 
-# 7. Create a PR for the changes
+# 8. Create a PR for the changes
 cosmic agents pr <agentId>
 # ✓ PR URL: https://github.com/user/recipe-blog/pull/1
 
-# 8. Deploy the updates
+# 9. Deploy the updates
 cosmic deploy start <repoId> --watch
 ```
 

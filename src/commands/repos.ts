@@ -5,11 +5,15 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { execSync, spawn } from 'child_process';
+import { existsSync, writeFileSync, mkdirSync } from 'fs';
+import { join, basename } from 'path';
 import { requireBucket } from '../config/context.js';
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
+import { getCredentials } from '../config/store.js';
 
 /**
  * List repositories
@@ -199,6 +203,254 @@ async function connectRepository(options: {
     spinner.fail('Failed to connect repository');
     display.error((error as Error).message);
     process.exit(1);
+  }
+}
+
+/**
+ * Clone repository and create .env file with Cosmic bucket keys
+ */
+async function cloneRepository(
+  repositoryIdOrUrl?: string,
+  options: {
+    directory?: string;
+    branch?: string;
+    noEnv?: boolean;
+    json?: boolean;
+  } = {}
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  let repoUrl: string;
+  let repoName: string;
+  let repoBranch: string;
+
+  // Check if git is available
+  try {
+    execSync('git --version', { stdio: 'pipe' });
+  } catch {
+    display.error('Git is not installed or not in PATH');
+    display.info('Please install Git: https://git-scm.com/downloads');
+    process.exit(1);
+  }
+
+  // If no argument provided, list repos and let user select
+  if (!repositoryIdOrUrl) {
+    spinner.start('Loading repositories...');
+    const { repositories } = await api.listRepositories(bucketSlug);
+    spinner.stop();
+
+    if (repositories.length === 0) {
+      display.error('No repositories connected to this bucket');
+      display.info(`Connect a repository with: ${chalk.cyan('cosmic repos connect')}`);
+      process.exit(1);
+    }
+
+    const choices = repositories.map((repo) => ({
+      name: repo.id,
+      message: `${repo.repository_name} (${repo.repository_url})`,
+    }));
+
+    const selectedId = await prompts.select({
+      message: 'Select a repository to clone:',
+      choices,
+    });
+
+    const selectedRepo = repositories.find((r) => r.id === selectedId);
+    if (!selectedRepo) {
+      display.error('Repository not found');
+      process.exit(1);
+    }
+
+    repoUrl = selectedRepo.repository_url;
+    repoName = selectedRepo.repository_name;
+    repoBranch = options.branch || selectedRepo.branch || selectedRepo.default_branch || 'main';
+  } else if (repositoryIdOrUrl.includes('github.com')) {
+    // It's a URL - try to find the repo in connected repos
+    repoUrl = repositoryIdOrUrl;
+    const urlMatch = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.\s]+)/);
+    repoName = urlMatch ? urlMatch[2].replace(/\.git$/, '') : basename(repoUrl).replace(/\.git$/, '');
+    repoBranch = options.branch || 'main';
+  } else {
+    // It's a repository ID
+    try {
+      spinner.start('Loading repository...');
+      const repo = await api.getRepository(bucketSlug, repositoryIdOrUrl);
+      spinner.succeed();
+
+      repoUrl = repo.repository_url;
+      repoName = repo.repository_name;
+      repoBranch = options.branch || repo.branch || repo.default_branch || 'main';
+    } catch (error) {
+      spinner.fail('Failed to load repository');
+      display.error((error as Error).message);
+      process.exit(1);
+    }
+  }
+
+  // Determine target directory
+  const targetDir = options.directory || repoName;
+  const fullPath = join(process.cwd(), targetDir);
+
+  // Check if directory already exists
+  if (existsSync(fullPath)) {
+    display.error(`Directory already exists: ${targetDir}`);
+    display.info('Use --directory to specify a different location');
+    process.exit(1);
+  }
+
+  // Clone the repository
+  console.log();
+  display.info(`Cloning ${chalk.cyan(repoName)} into ${chalk.dim(targetDir)}...`);
+  console.log();
+
+  try {
+    // Use spawn to show git output in real-time
+    await new Promise<void>((resolve, reject) => {
+      const gitProcess = spawn('git', ['clone', '--branch', repoBranch, repoUrl, targetDir], {
+        stdio: 'inherit',
+        cwd: process.cwd(),
+      });
+
+      gitProcess.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Git clone failed with exit code ${code}`));
+        }
+      });
+
+      gitProcess.on('error', (err) => {
+        reject(err);
+      });
+    });
+  } catch (error) {
+    display.error(`Failed to clone repository: ${(error as Error).message}`);
+    process.exit(1);
+  }
+
+  console.log();
+  display.success(`Repository cloned to ${chalk.cyan(targetDir)}`);
+
+  // Create .env file with Cosmic bucket keys unless --no-env is specified
+  if (!options.noEnv) {
+    await createEnvFile(fullPath, bucketSlug);
+  }
+
+  if (options.json) {
+    display.json({
+      repository: repoName,
+      directory: targetDir,
+      branch: repoBranch,
+      envCreated: !options.noEnv,
+    });
+  } else {
+    console.log();
+    display.subheader('Next steps');
+    console.log(`  ${chalk.dim('1.')} cd ${targetDir}`);
+    console.log(`  ${chalk.dim('2.')} npm install ${chalk.dim('# or bun install')}`);
+    console.log(`  ${chalk.dim('3.')} npm run dev ${chalk.dim('# Start development server')}`);
+  }
+}
+
+/**
+ * Create .env file with Cosmic bucket API keys
+ */
+async function createEnvFile(targetDir: string, bucketSlug: string): Promise<void> {
+  const envPath = join(targetDir, '.env');
+  const envLocalPath = join(targetDir, '.env.local');
+
+  // Check if .env or .env.local already exists
+  const targetEnvPath = existsSync(envLocalPath) ? envLocalPath : envPath;
+  const envFileName = basename(targetEnvPath);
+
+  // Try to get bucket keys
+  let readKey: string | undefined;
+  let writeKey: string | undefined;
+
+  // First check if we already have keys stored
+  const creds = getCredentials();
+  if (creds.bucketSlug === bucketSlug && creds.readKey) {
+    readKey = creds.readKey;
+    writeKey = creds.writeKey;
+  } else {
+    // Try to fetch from API
+    try {
+      spinner.start('Fetching bucket API keys...');
+      const bucket = await api.getBucket(bucketSlug);
+      const bucketAny = bucket as Record<string, unknown>;
+      const apiAccess = bucketAny.api_access as Record<string, string> | undefined;
+
+      if (apiAccess && apiAccess.read_key) {
+        readKey = apiAccess.read_key;
+        writeKey = apiAccess.write_key;
+        spinner.succeed('API keys retrieved');
+      } else {
+        spinner.fail('Bucket API keys not available from API');
+      }
+    } catch (error) {
+      spinner.fail('Could not fetch bucket API keys');
+      display.warning('You may need to manually add API keys to .env');
+    }
+  }
+
+  // Build .env content
+  const envLines: string[] = [
+    '# Cosmic CMS Environment Variables',
+    '# Generated by Cosmic CLI',
+    '',
+    '# Bucket Configuration',
+    `COSMIC_BUCKET_SLUG=${bucketSlug}`,
+  ];
+
+  if (readKey) {
+    envLines.push(`COSMIC_READ_KEY=${readKey}`);
+  } else {
+    envLines.push('# COSMIC_READ_KEY=your_read_key_here');
+  }
+
+  if (writeKey) {
+    envLines.push(`COSMIC_WRITE_KEY=${writeKey}`);
+  } else {
+    envLines.push('# COSMIC_WRITE_KEY=your_write_key_here');
+  }
+
+  // Add Next.js public variants (commonly needed)
+  envLines.push('');
+  envLines.push('# Next.js Public Variables (client-side access)');
+  envLines.push(`NEXT_PUBLIC_COSMIC_BUCKET_SLUG=${bucketSlug}`);
+  if (readKey) {
+    envLines.push(`NEXT_PUBLIC_COSMIC_READ_KEY=${readKey}`);
+  } else {
+    envLines.push('# NEXT_PUBLIC_COSMIC_READ_KEY=your_read_key_here');
+  }
+
+  const envContent = envLines.join('\n') + '\n';
+
+  // Write the .env file
+  try {
+    // Check if .env already exists and has content
+    if (existsSync(targetEnvPath)) {
+      const shouldOverwrite = await prompts.confirm({
+        message: `${envFileName} already exists. Overwrite?`,
+        initial: false,
+      });
+
+      if (!shouldOverwrite) {
+        display.info('Skipping .env file creation');
+        return;
+      }
+    }
+
+    writeFileSync(targetEnvPath, envContent);
+    display.success(`Created ${chalk.cyan(envFileName)} with Cosmic bucket keys`);
+
+    // Show what was created
+    console.log();
+    display.subheader('Environment Variables');
+    display.keyValue('COSMIC_BUCKET_SLUG', bucketSlug);
+    display.keyValue('COSMIC_READ_KEY', readKey ? chalk.dim(readKey.substring(0, 8) + '...') : chalk.yellow('(not set)'));
+    display.keyValue('COSMIC_WRITE_KEY', writeKey ? chalk.dim(writeKey.substring(0, 8) + '...') : chalk.yellow('(not set)'));
+  } catch (error) {
+    display.error(`Failed to create ${envFileName}: ${(error as Error).message}`);
   }
 }
 
@@ -869,6 +1121,15 @@ export function createReposCommands(program: Command): void {
     .description('Disconnect a repository')
     .option('-f, --force', 'Skip confirmation')
     .action(deleteRepository);
+
+  reposCmd
+    .command('clone [repositoryIdOrUrl]')
+    .description('Clone a repository and create .env with Cosmic bucket keys')
+    .option('-d, --directory <dir>', 'Target directory name')
+    .option('-b, --branch <branch>', 'Branch to clone')
+    .option('--no-env', 'Skip creating .env file')
+    .option('--json', 'Output as JSON')
+    .action(cloneRepository);
 
   // Branches subcommand
   const branchesCmd = reposCmd

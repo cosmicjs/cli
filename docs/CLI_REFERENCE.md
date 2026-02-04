@@ -478,6 +478,81 @@ cosmic repos rm <id>                         # Alias
 cosmic repos delete <id> --force             # Skip confirmation
 ```
 
+### `cosmic repos clone`
+
+Clone a repository locally and auto-create a `.env` file with Cosmic bucket API keys.
+
+```bash
+cosmic repos clone                           # Interactive selection
+cosmic repos clone <repositoryId>            # Clone by repository ID
+cosmic repos clone <github-url>              # Clone by GitHub URL
+cosmic repos clone <id> -d my-project        # Custom directory name
+cosmic repos clone <id> -b develop           # Clone specific branch
+cosmic repos clone <id> --no-env             # Skip .env creation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-d, --directory <dir>` | Target directory name (default: repo name) |
+| `-b, --branch <branch>` | Branch to clone (default: repo's default branch) |
+| `--no-env` | Skip creating the .env file |
+| `--json` | Output as JSON |
+
+**What it does:**
+1. Clones the repository using `git clone`
+2. Creates a `.env` file with:
+   - `COSMIC_BUCKET_SLUG` - Your bucket slug
+   - `COSMIC_READ_KEY` - API read key
+   - `COSMIC_WRITE_KEY` - API write key
+   - `NEXT_PUBLIC_COSMIC_BUCKET_SLUG` - For Next.js client-side
+   - `NEXT_PUBLIC_COSMIC_READ_KEY` - For Next.js client-side
+
+**Examples:**
+```bash
+# Interactive - shows list of connected repos to choose from
+cosmic repos clone
+
+# Clone by repository ID
+cosmic repos clone 507f1f77bcf86cd799439011
+
+# Clone a GitHub URL
+cosmic repos clone https://github.com/cosmicjs/nextjs-blog
+
+# Clone to a specific directory
+cosmic repos clone 507f1f77bcf86cd799439011 -d my-blog
+
+# Clone a specific branch
+cosmic repos clone 507f1f77bcf86cd799439011 -b develop
+
+# Clone without creating .env (if you have your own setup)
+cosmic repos clone 507f1f77bcf86cd799439011 --no-env
+```
+
+**Output example:**
+```
+  Cloning my-blog into my-blog...
+
+Cloning into 'my-blog'...
+remote: Enumerating objects: 150, done.
+...
+
+  ✓ Repository cloned to my-blog
+  Fetching bucket API keys...
+  ✓ API keys configured
+  ✓ Created .env with Cosmic bucket keys
+
+  Environment Variables
+  COSMIC_BUCKET_SLUG   my-bucket
+  COSMIC_READ_KEY      abc123...
+  COSMIC_WRITE_KEY     xyz789...
+
+  Next steps
+    1. cd my-blog
+    2. npm install # or bun install
+    3. npm run dev # Start development server
+```
+
 ### Branch Management
 
 #### `cosmic repos branches <repoId> list`
@@ -1243,6 +1318,29 @@ Many commands have short aliases for convenience:
 
 ## Examples
 
+### Clone Repository for Local Development
+
+```bash
+# Clone a connected repository with auto-configured environment
+cosmic repos clone                     # Interactive - select from connected repos
+cosmic repos clone my-repo-id          # By repository ID  
+cosmic repos clone https://github.com/user/my-app  # By URL
+
+# The clone command automatically:
+# 1. Clones the repo to your local machine
+# 2. Creates .env with your Cosmic API keys:
+#    - COSMIC_BUCKET_SLUG
+#    - COSMIC_READ_KEY  
+#    - COSMIC_WRITE_KEY
+#    - NEXT_PUBLIC_COSMIC_BUCKET_SLUG (for Next.js)
+#    - NEXT_PUBLIC_COSMIC_READ_KEY (for Next.js)
+
+# Start developing immediately
+cd my-app
+npm install
+npm run dev
+```
+
 ### Complete App Workflow (Full Walkthrough)
 
 ```bash
@@ -1277,8 +1375,11 @@ cosmic repos list                      # Find repo ID
 cosmic deploy start <repoId> --watch   # Deploy to Vercel
 # ✓ Deployment ready: https://recipe-blog-xyz.vercel.app
 
-# 7. Open your app and review it
-# Visit the deployment URL in your browser
+# 7. Clone locally for development
+cosmic repos clone <repoId>            # Clone with .env auto-configured
+cd recipe-blog
+npm install
+npm run dev                            # Start local development
 
 # 8. Make updates to the app
 cosmic update <repoName> -p "Add a favorites feature where users can 
