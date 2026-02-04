@@ -127,13 +127,25 @@ function generateEnvVarDescription(key: string): string {
   const lowerKey = key.toLowerCase();
 
   if (lowerKey.includes('resend')) {
-    return 'Resend API key for email sending';
+    return 'Resend API key for email sending (get from https://resend.com/api-keys)';
+  } else if (lowerKey.includes('stripe') && lowerKey.includes('secret')) {
+    return 'Stripe secret key for payments (get from https://dashboard.stripe.com/apikeys)';
+  } else if (lowerKey.includes('stripe') && lowerKey.includes('publish')) {
+    return 'Stripe publishable key for frontend payments';
+  } else if (lowerKey.includes('stripe') && lowerKey.includes('webhook')) {
+    return 'Stripe webhook secret for verifying webhooks';
   } else if (lowerKey.includes('stripe')) {
     return 'Stripe API key for payments';
   } else if (lowerKey.includes('openai')) {
-    return 'OpenAI API key for AI features';
+    return 'OpenAI API key for AI features (get from https://platform.openai.com/api-keys)';
   } else if (lowerKey.includes('anthropic')) {
     return 'Anthropic API key for AI features';
+  } else if (lowerKey.includes('sendgrid')) {
+    return 'SendGrid API key for email sending';
+  } else if (lowerKey.includes('mailgun')) {
+    return 'Mailgun API key for email sending';
+  } else if (lowerKey.includes('twilio')) {
+    return 'Twilio credentials for SMS';
   } else if (lowerKey.includes('api') && lowerKey.includes('key')) {
     return 'API key for external service';
   } else if (lowerKey.includes('url')) {
@@ -161,4 +173,83 @@ function generateEnvVarDescription(key: string): string {
   return `Environment variable: ${key}`;
 }
 
-export default { extractEnvVarsFromContent };
+/**
+ * Extract environment variables from code patterns like process.env.VAR_NAME
+ * This is used to detect env vars from AI-generated code before deployment
+ */
+export function extractEnvVarsFromCode(content: string): EnvVar[] {
+  const envVars = new Map<string, EnvVar>(); // Use Map to dedupe by key
+
+  // Cosmic env vars that are automatically provided - exclude these
+  const cosmicEnvVars = [
+    'COSMIC_BUCKET_SLUG',
+    'COSMIC_READ_KEY',
+    'COSMIC_WRITE_KEY',
+    'COSMIC_API_URL',
+    'COSMIC_BUCKET_ID',
+    'NEXT_PUBLIC_COSMIC_BUCKET_SLUG',
+    'NEXT_PUBLIC_COSMIC_READ_KEY',
+  ];
+
+  // Common env vars that don't need configuration
+  const ignoredEnvVars = ['NODE_ENV', 'PORT', 'HOST', 'PWD', 'HOME', 'PATH', 'CI', 'VERCEL_URL'];
+
+  // Patterns to detect env var usage in code
+  const patterns = [
+    // JavaScript/TypeScript: process.env.VAR_NAME
+    /process\.env\.([A-Z][A-Z0-9_]*)/g,
+    // JavaScript/TypeScript: process.env['VAR_NAME'] or process.env["VAR_NAME"]
+    /process\.env\[['"]([A-Z][A-Z0-9_]*)['"]\]/g,
+    // Next.js public vars
+    /process\.env\.(NEXT_PUBLIC_[A-Z][A-Z0-9_]*)/g,
+  ];
+
+  for (const pattern of patterns) {
+    // Reset regex lastIndex for global patterns
+    pattern.lastIndex = 0;
+    let match;
+
+    while ((match = pattern.exec(content)) !== null) {
+      const envVarName = match[1];
+
+      // Skip Cosmic auto-provided vars
+      if (cosmicEnvVars.includes(envVarName)) continue;
+
+      // Skip common vars that don't need configuration
+      if (ignoredEnvVars.includes(envVarName)) continue;
+
+      // Skip if already found
+      if (envVars.has(envVarName)) continue;
+
+      envVars.set(envVarName, {
+        key: envVarName,
+        value: '', // User will need to provide the value
+        description: generateEnvVarDescription(envVarName),
+        required: true,
+      });
+    }
+  }
+
+  return Array.from(envVars.values());
+}
+
+/**
+ * Parse env vars from an SSE event data (from backend env_vars_required event)
+ */
+export interface BackendEnvVar {
+  key: string;
+  description: string;
+  required: boolean;
+  detected_in?: string;
+}
+
+export function parseBackendEnvVars(envVarsData: BackendEnvVar[]): EnvVar[] {
+  return envVarsData.map((v) => ({
+    key: v.key,
+    value: '', // User will need to provide the value
+    description: v.description,
+    required: v.required,
+  }));
+}
+
+export default { extractEnvVarsFromContent, extractEnvVarsFromCode, parseBackendEnvVars };

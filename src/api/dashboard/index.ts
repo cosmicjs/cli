@@ -144,8 +144,14 @@ export {
   generateImage,
   streamingChat,
   streamingRepositoryUpdate,
+  commitPendingOperations,
   type ChatMessage,
   type StreamingChatOptions,
   type RepositoryUpdateOptions,
+  type RepositoryUpdateResult,
+  type RepositoryPendingOperations,
+  type EnvVarFromBackend,
+  type CommitPendingOptions,
+  type CommitPendingResult,
 } from './ai.js';
 

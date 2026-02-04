@@ -30,6 +30,7 @@ import {
   getLatestDeploymentStatus,
   getDeploymentLogs,
   streamingRepositoryUpdate,
+  commitPendingOperations,
   createObjectType,
   createObjectWithMetafields,
   updateObjectWithMetafields,
@@ -40,7 +41,8 @@ import {
   addRepositoryEnvVar,
   type DeploymentLog,
 } from '../api/dashboard.js';
-import { extractEnvVarsFromContent } from '../utils/envVars.js';
+import { extractEnvVarsFromContent, extractEnvVarsFromCode } from '../utils/envVars.js';
+import type { EnvVarFromBackend, RepositoryPendingOperations } from '../api/dashboard/ai.js';
 import * as api from '../api/dashboard.js';
 import * as display from '../utils/display.js';
 import {
@@ -4371,6 +4373,10 @@ async function processMessage(
         let currentFile = '';
         let isEditingFiles = false;
 
+        // NEW: Track detected env vars from backend
+        let pendingEnvVars: EnvVarFromBackend[] = [];
+        let envVarsRequiredBeforeDeploy = false;
+
         const result = await streamingRepositoryUpdate({
           repositoryOwner: currentRepo.owner,
           repositoryName: currentRepo.name,
@@ -4438,6 +4444,16 @@ async function processMessage(
               process.stdout.write(`\r${' '.repeat(60)}\r`);
               console.log(chalk.dim(`  🔄 ${progress.message || progress.stage}...`));
             }
+
+            // NEW: Detect env_vars_required event from backend
+            if (progress.stage === 'env_vars_required' && progress.env_vars && progress.env_vars.length > 0) {
+              pendingEnvVars = progress.env_vars;
+              envVarsRequiredBeforeDeploy = progress.required_before_deploy || false;
+
+              if (verbose) {
+                console.log(chalk.dim(`  [ENV VARS] Detected ${progress.env_vars.length} env var(s): ${progress.env_vars.map(v => v.key).join(', ')}`));
+              }
+            }
           },
         });
 
@@ -4448,8 +4464,21 @@ async function processMessage(
           console.log(); // Single newline after streamed content
         }
 
-        // Show summary
-        if (fileCount > 0) {
+        // NEW: Check if env vars are pending (commit was blocked by backend)
+        // Use result.envVarsPending from backend OR fallback to pendingEnvVars from onProgress
+        const envVarsArePending = result.envVarsPending || (pendingEnvVars.length > 0 && envVarsRequiredBeforeDeploy);
+        const envVarsToHandle = result.envVars || pendingEnvVars;
+        const pendingOps = result.pendingOperations;
+
+        // Show appropriate summary based on whether commit happened
+        if (envVarsArePending && pendingOps) {
+          // Commit was BLOCKED - changes prepared but not committed yet
+          console.log();
+          console.log(chalk.yellow('  ⏸️  Code Changes Ready - Deployment Paused'));
+          console.log(chalk.dim('  Your code changes have been prepared but NOT committed yet.'));
+          console.log(chalk.dim('  Configure the required environment variables below, then we will commit and deploy.'));
+        } else if (fileCount > 0) {
+          // Normal flow - changes were committed
           console.log(chalk.green(`  ✓ Updated ${fileCount} file(s)`));
           console.log(chalk.dim(`  Changes pushed to ${currentRepo.owner}/${currentRepo.name}`));
         }
@@ -4461,223 +4490,363 @@ async function processMessage(
           _alreadyStreamed: alreadyStreamedText,
         };
 
-        // Always poll for deployment status after repo update
-        // (The AI pushes changes automatically, so check for deployment)
-        console.log();
-        console.log(chalk.yellow('  Checking for Vercel deployment...'));
-
-        // Give Vercel a moment to detect the push
-        await new Promise(resolve => setTimeout(resolve, 3000));
-
-        // Poll deployment status and offer AI fix loop until success or user declines
-        let keepFixing = true;
-        while (keepFixing) {
-          try {
-            const deployResult = await pollDeploymentStatus(
-              bucketSlug,
-              currentRepo.name, // Use repo name as vercel project ID
-              `https://github.com/${currentRepo.owner}/${currentRepo.name}`
-            );
-
-            // If deployment succeeded, exit the loop
-            if (deployResult.success) {
-              keepFixing = false;
-              break;
-            }
-
-            // If deployment failed and we have logs, offer to fix with AI
-            if (!deployResult.success && deployResult.logs && deployResult.logs.length > 0) {
-              console.log();
-              console.log(chalk.yellow('  Would you like AI to analyze the logs and fix the build error?'));
-              const fixInput = await sharedAskLine!(chalk.yellow('  Fix with AI? [Y/n]: '));
-              const fixWithAI = fixInput.toLowerCase() !== 'n';
-
-              if (!fixWithAI) {
-                keepFixing = false;
-                break;
-              }
-
-              console.log();
-              console.log(chalk.cyan('  Sending build logs to AI for analysis...'));
-              console.log();
-
-              // Format logs as text for the AI (filter out any logs with missing text)
-              const logsText = deployResult.logs
-                .filter(log => log.text && typeof log.text === 'string')
-                .map(log => `[${log.type}] ${log.text}`)
-                .join('\n');
-
-              const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
-
-              try {
-                await streamingRepositoryUpdate({
-                  repositoryOwner: currentRepo.owner,
-                  repositoryName: currentRepo.name,
-                  repositoryId: currentRepo.id,
-                  bucketSlug,
-                  messages: [{
-                    role: 'user',
-                    content: userMessage,
-                  }],
-                  onChunk: (chunk) => {
-                    process.stdout.write(chunk);
-                  },
-                  onComplete: () => {
-                    console.log();
-                    console.log();
-                    console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
-                    console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
-                    console.log();
-                  },
-                  onError: (error) => {
-                    console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
-                    console.log();
-                  },
-                });
-
-                // Wait a moment for Vercel to pick up the new commit, then poll again
-                console.log(chalk.dim('  Waiting for new deployment to start...'));
-                await new Promise(resolve => setTimeout(resolve, 10000));
-                // Loop will poll again for the new deployment
-              } catch (aiError) {
-                console.log(chalk.red(`  ✗ Failed to fix with AI: ${(aiError as Error).message}`));
-                console.log();
-                keepFixing = false;
-              }
-            } else if (!deployResult.success && !deployResult.error) {
-              // Timeout or other non-error failure without logs
-              console.log(chalk.dim('  Deployment is still in progress. Check Vercel dashboard for status.'));
-              keepFixing = false;
-            } else {
-              // Some other failure case
-              keepFixing = false;
-            }
-          } catch (err) {
-            // Deployment polling failed - not critical, repo update succeeded
-            if (verbose) {
-              console.log(chalk.dim(`  [DEBUG] Deployment poll error: ${(err as Error).message}`));
-            }
-            console.log(chalk.dim('  Could not check deployment status. Changes were pushed to the repository.'));
-            keepFixing = false;
+        // Handle env vars - REQUIRED if commit was blocked, or prompt if detected
+        let envVarsConfigured = false;
+        if (envVarsToHandle.length > 0) {
+          console.log();
+          if (envVarsArePending) {
+            console.log(chalk.yellow(`  ⚠️  ${envVarsToHandle.length} environment variable(s) required before deployment:`));
+          } else {
+            console.log(chalk.yellow(`  ⚠️  Detected ${envVarsToHandle.length} environment variable(s) that need to be configured:`));
           }
-        }
-
-        // Check for environment variables that need to be configured
-        const detectedEnvVars = extractEnvVarsFromContent(fullText);
-        if (detectedEnvVars.length > 0) {
-          console.log();
-          console.log(chalk.yellow(`  🔧 Detected ${detectedEnvVars.length} environment variable(s) that may need to be configured:`));
           console.log();
 
+          // Check which env vars already exist
           try {
-            // Check which env vars already exist
             const existingEnvVars = await getRepositoryEnvVars(bucketSlug, currentRepo.id);
             const existingKeys = existingEnvVars.map((v) => v.key);
 
-            // Filter out existing ones
-            const newEnvVars = detectedEnvVars.filter((v) => !existingKeys.includes(v.key));
+            // Filter out already configured vars
+            const newEnvVars = envVarsToHandle.filter((v) => !existingKeys.includes(v.key));
 
             if (newEnvVars.length === 0) {
               console.log(chalk.green('  ✓ All detected environment variables are already configured'));
+              envVarsConfigured = true;
             } else {
-              // Display new env vars
+              // Display new env vars that need to be added
               newEnvVars.forEach((envVar, idx) => {
                 console.log(chalk.cyan(`  ${idx + 1}. ${envVar.key}`));
                 console.log(chalk.dim(`     ${envVar.description}`));
-                // Show placeholder value (don't show actual sensitive values)
-                const displayValue = envVar.value.includes('your_') || envVar.value.includes('your-')
-                  ? envVar.value
-                  : '<needs to be set>';
-                console.log(chalk.dim(`     Current: ${displayValue}`));
+                if (envVar.detected_in) {
+                  console.log(chalk.dim(`     Detected in: ${envVar.detected_in}`));
+                }
                 console.log();
               });
 
-              const addEnvVarsInput = await sharedAskLine!(chalk.yellow('  Would you like to add these environment variables? [Y/n]: '));
+              // Prompt to add env vars
+              const promptMessage = envVarsArePending
+                ? chalk.yellow('  Add these environment variables to proceed? [Y/n]: ')
+                : chalk.yellow('  Would you like to add these environment variables now? [Y/n]: ');
+              const addEnvVarsInput = await sharedAskLine!(promptMessage);
 
               if (addEnvVarsInput.toLowerCase() !== 'n') {
                 console.log();
 
-                // Prompt for each env var value
-                const envVarsToAdd: Array<{ key: string; value: string }> = [];
-
+                let allConfigured = true;
                 for (const envVar of newEnvVars) {
-                  const defaultValue = envVar.value.includes('your_') || envVar.value.includes('your-')
-                    ? ''
-                    : envVar.value;
+                  const valueInput = await sharedAskLine!(chalk.cyan(`  Enter value for ${envVar.key}: `));
 
-                  const valueInput = await sharedAskLine!(
-                    chalk.cyan(`  Enter value for ${envVar.key}${defaultValue ? ` [${defaultValue}]` : ''}: `)
-                  );
-
-                  const finalValue = valueInput.trim() || defaultValue;
-
-                  if (finalValue) {
-                    envVarsToAdd.push({ key: envVar.key, value: finalValue });
-                  } else {
-                    console.log(chalk.dim(`  Skipping ${envVar.key} (no value provided)`));
-                  }
-                }
-
-                if (envVarsToAdd.length > 0) {
-                  console.log();
-                  console.log(chalk.cyan('  Adding environment variables...'));
-
-                  // Add each env var
-                  for (const envVar of envVarsToAdd) {
+                  if (valueInput.trim()) {
                     try {
                       await addRepositoryEnvVar(bucketSlug, currentRepo.id, {
                         key: envVar.key,
-                        value: envVar.value,
+                        value: valueInput.trim(),
                         target: ['production', 'preview', 'development'],
                         type: 'encrypted',
                       });
                       console.log(chalk.green(`  ✓ Added ${envVar.key}`));
                     } catch (error) {
                       console.log(chalk.red(`  ✗ Failed to add ${envVar.key}: ${(error as Error).message}`));
+                      allConfigured = false;
                     }
+                  } else {
+                    console.log(chalk.yellow(`  ⚠ Skipped ${envVar.key} (no value provided)`));
+                    allConfigured = false;
                   }
+                }
 
-                  console.log();
-                  console.log(chalk.green('  ✓ Environment variables added successfully'));
-                  console.log(chalk.yellow('  ⚠ Note: A redeploy is needed for the changes to take effect'));
-
-                  // Offer to trigger a redeploy
-                  const redeployInput = await sharedAskLine!(chalk.yellow('  Would you like to trigger a redeploy now? [Y/n]: '));
-
-                  if (redeployInput.toLowerCase() !== 'n') {
-                    console.log();
-                    console.log(chalk.cyan('  Triggering redeploy...'));
-
-                    try {
-                      await deployRepository(bucketSlug, currentRepo.id);
-                      console.log(chalk.green('  ✓ Redeploy triggered!'));
-                      console.log(chalk.dim('  The site will be updated shortly.'));
-
-                      // Poll for deployment status
-                      console.log();
-                      console.log(chalk.yellow('  Waiting for deployment...'));
-                      await new Promise((resolve) => setTimeout(resolve, 3000));
-
-                      await pollDeploymentStatus(
-                        bucketSlug,
-                        currentRepo.name,
-                        `https://github.com/${currentRepo.owner}/${currentRepo.name}`
-                      );
-                    } catch (deployError) {
-                      console.log(chalk.red(`  ✗ Failed to trigger redeploy: ${(deployError as Error).message}`));
-                    }
-                  }
+                console.log();
+                console.log(chalk.green('  ✓ Environment variables configured'));
+                envVarsConfigured = allConfigured;
+              } else {
+                console.log(chalk.yellow('  ⚠ Skipping environment variable configuration'));
+                if (envVarsArePending) {
+                  console.log(chalk.dim('  The commit will be skipped. Use "cosmic update" to try again later.'));
+                } else {
+                  console.log(chalk.dim('  The deployment may fail if these variables are required.'));
                 }
               }
             }
           } catch (error) {
-            if (verbose) {
-              console.log(chalk.dim(`  [DEBUG] Env var check error: ${(error as Error).message}`));
-            }
-            // Don't block on env var errors - this is a nice-to-have feature
-            console.log(chalk.dim('  Could not check environment variables. You may need to configure them manually.'));
+            console.error(chalk.red(`  Error checking environment variables: ${(error as Error).message}`));
           }
         }
+
+        // NEW: If commit was blocked (env_vars_pending), now commit after env vars are configured
+        let skipDeploymentPolling = false;
+
+        if (envVarsArePending && pendingOps) {
+          if (!envVarsConfigured && envVarsToHandle.length > 0) {
+            // User skipped env var configuration - don't commit
+            console.log();
+            console.log(chalk.yellow('  ⚠ Deployment cancelled - environment variables not configured'));
+            console.log(chalk.dim('  Your code changes have NOT been committed. Configure the required'));
+            console.log(chalk.dim('  environment variables and run "cosmic update" again to deploy.'));
+            // Skip deployment polling since we didn't commit
+            skipDeploymentPolling = true;
+          } else {
+            // Env vars configured or all already existed - now commit the pending changes
+            console.log();
+            console.log(chalk.cyan('  📤 Committing changes...'));
+
+            try {
+              const commitResult = await commitPendingOperations({
+                bucketSlug,
+                operations: pendingOps.operations,
+                commitMessage: pendingOps.commit_message,
+                branch: pendingOps.branch,
+                repoFullName: pendingOps.repo_full_name,
+                repositoryId: currentRepo.id,
+              });
+
+              if (commitResult.success) {
+                console.log(chalk.green('  ✓ Changes committed successfully'));
+                if (commitResult.commit_url) {
+                  console.log(chalk.dim(`  ${commitResult.commit_url}`));
+                }
+
+                // Now poll for deployment
+                console.log();
+                console.log(chalk.yellow('  Checking for Vercel deployment...'));
+              } else {
+                console.log(chalk.red(`  ✗ Failed to commit changes: ${commitResult.message || commitResult.error}`));
+                console.log(chalk.dim('  You may need to run "cosmic update" again to retry.'));
+                skipDeploymentPolling = true;
+              }
+            } catch (commitError) {
+              console.log(chalk.red(`  ✗ Commit error: ${(commitError as Error).message}`));
+              skipDeploymentPolling = true;
+            }
+          }
+        } else {
+          // Normal flow - changes already committed, poll for deployment
+          console.log();
+          console.log(chalk.yellow('  Checking for Vercel deployment...'));
+        }
+
+        // Skip deployment polling if requested
+        if (skipDeploymentPolling) {
+          conversationHistory.push({
+            role: 'assistant',
+            content: response.text || '',
+          });
+        }
+
+        // Only poll for deployment if not skipped
+        if (!skipDeploymentPolling) {
+          // Give Vercel a moment to detect the push
+          await new Promise(resolve => setTimeout(resolve, 3000));
+
+          // Poll deployment status and offer AI fix loop until success or user declines
+          let keepFixing = true;
+          while (keepFixing) {
+            try {
+              const deployResult = await pollDeploymentStatus(
+                bucketSlug,
+                currentRepo.name, // Use repo name as vercel project ID
+                `https://github.com/${currentRepo.owner}/${currentRepo.name}`
+              );
+
+              // If deployment succeeded, exit the loop
+              if (deployResult.success) {
+                keepFixing = false;
+                break;
+              }
+
+              // If deployment failed and we have logs, offer to fix with AI
+              if (!deployResult.success && deployResult.logs && deployResult.logs.length > 0) {
+                console.log();
+                console.log(chalk.yellow('  Would you like AI to analyze the logs and fix the build error?'));
+                const fixInput = await sharedAskLine!(chalk.yellow('  Fix with AI? [Y/n]: '));
+                const fixWithAI = fixInput.toLowerCase() !== 'n';
+
+                if (!fixWithAI) {
+                  keepFixing = false;
+                  break;
+                }
+
+                console.log();
+                console.log(chalk.cyan('  Sending build logs to AI for analysis...'));
+                console.log();
+
+                // Format logs as text for the AI (filter out any logs with missing text)
+                const logsText = deployResult.logs
+                  .filter(log => log.text && typeof log.text === 'string')
+                  .map(log => `[${log.type}] ${log.text}`)
+                  .join('\n');
+
+                const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
+
+                try {
+                  await streamingRepositoryUpdate({
+                    repositoryOwner: currentRepo.owner,
+                    repositoryName: currentRepo.name,
+                    repositoryId: currentRepo.id,
+                    bucketSlug,
+                    messages: [{
+                      role: 'user',
+                      content: userMessage,
+                    }],
+                    onChunk: (chunk) => {
+                      process.stdout.write(chunk);
+                    },
+                    onComplete: () => {
+                      console.log();
+                      console.log();
+                      console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                      console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
+                      console.log();
+                    },
+                    onError: (error) => {
+                      console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                      console.log();
+                    },
+                  });
+
+                  // Wait a moment for Vercel to pick up the new commit, then poll again
+                  console.log(chalk.dim('  Waiting for new deployment to start...'));
+                  await new Promise(resolve => setTimeout(resolve, 10000));
+                  // Loop will poll again for the new deployment
+                } catch (aiError) {
+                  console.log(chalk.red(`  ✗ Failed to fix with AI: ${(aiError as Error).message}`));
+                  console.log();
+                  keepFixing = false;
+                }
+              } else if (!deployResult.success && !deployResult.error) {
+                // Timeout or other non-error failure without logs
+                console.log(chalk.dim('  Deployment is still in progress. Check Vercel dashboard for status.'));
+                keepFixing = false;
+              } else {
+                // Some other failure case
+                keepFixing = false;
+              }
+            } catch (err) {
+              // Deployment polling failed - not critical, repo update succeeded
+              if (verbose) {
+                console.log(chalk.dim(`  [DEBUG] Deployment poll error: ${(err as Error).message}`));
+              }
+              console.log(chalk.dim('  Could not check deployment status. Changes were pushed to the repository.'));
+              keepFixing = false;
+            }
+          }
+
+          // Check for environment variables that need to be configured
+          const detectedEnvVars = extractEnvVarsFromContent(fullText);
+          if (detectedEnvVars.length > 0) {
+            console.log();
+            console.log(chalk.yellow(`  🔧 Detected ${detectedEnvVars.length} environment variable(s) that may need to be configured:`));
+            console.log();
+
+            try {
+              // Check which env vars already exist
+              const existingEnvVars = await getRepositoryEnvVars(bucketSlug, currentRepo.id);
+              const existingKeys = existingEnvVars.map((v) => v.key);
+
+              // Filter out existing ones
+              const newEnvVars = detectedEnvVars.filter((v) => !existingKeys.includes(v.key));
+
+              if (newEnvVars.length === 0) {
+                console.log(chalk.green('  ✓ All detected environment variables are already configured'));
+              } else {
+                // Display new env vars
+                newEnvVars.forEach((envVar, idx) => {
+                  console.log(chalk.cyan(`  ${idx + 1}. ${envVar.key}`));
+                  console.log(chalk.dim(`     ${envVar.description}`));
+                  // Show placeholder value (don't show actual sensitive values)
+                  const displayValue = envVar.value.includes('your_') || envVar.value.includes('your-')
+                    ? envVar.value
+                    : '<needs to be set>';
+                  console.log(chalk.dim(`     Current: ${displayValue}`));
+                  console.log();
+                });
+
+                const addEnvVarsInput = await sharedAskLine!(chalk.yellow('  Would you like to add these environment variables? [Y/n]: '));
+
+                if (addEnvVarsInput.toLowerCase() !== 'n') {
+                  console.log();
+
+                  // Prompt for each env var value
+                  const envVarsToAdd: Array<{ key: string; value: string }> = [];
+
+                  for (const envVar of newEnvVars) {
+                    const defaultValue = envVar.value.includes('your_') || envVar.value.includes('your-')
+                      ? ''
+                      : envVar.value;
+
+                    const valueInput = await sharedAskLine!(
+                      chalk.cyan(`  Enter value for ${envVar.key}${defaultValue ? ` [${defaultValue}]` : ''}: `)
+                    );
+
+                    const finalValue = valueInput.trim() || defaultValue;
+
+                    if (finalValue) {
+                      envVarsToAdd.push({ key: envVar.key, value: finalValue });
+                    } else {
+                      console.log(chalk.dim(`  Skipping ${envVar.key} (no value provided)`));
+                    }
+                  }
+
+                  if (envVarsToAdd.length > 0) {
+                    console.log();
+                    console.log(chalk.cyan('  Adding environment variables...'));
+
+                    // Add each env var
+                    for (const envVar of envVarsToAdd) {
+                      try {
+                        await addRepositoryEnvVar(bucketSlug, currentRepo.id, {
+                          key: envVar.key,
+                          value: envVar.value,
+                          target: ['production', 'preview', 'development'],
+                          type: 'encrypted',
+                        });
+                        console.log(chalk.green(`  ✓ Added ${envVar.key}`));
+                      } catch (error) {
+                        console.log(chalk.red(`  ✗ Failed to add ${envVar.key}: ${(error as Error).message}`));
+                      }
+                    }
+
+                    console.log();
+                    console.log(chalk.green('  ✓ Environment variables added successfully'));
+                    console.log(chalk.yellow('  ⚠ Note: A redeploy is needed for the changes to take effect'));
+
+                    // Offer to trigger a redeploy
+                    const redeployInput = await sharedAskLine!(chalk.yellow('  Would you like to trigger a redeploy now? [Y/n]: '));
+
+                    if (redeployInput.toLowerCase() !== 'n') {
+                      console.log();
+                      console.log(chalk.cyan('  Triggering redeploy...'));
+
+                      try {
+                        await deployRepository(bucketSlug, currentRepo.id);
+                        console.log(chalk.green('  ✓ Redeploy triggered!'));
+                        console.log(chalk.dim('  The site will be updated shortly.'));
+
+                        // Poll for deployment status
+                        console.log();
+                        console.log(chalk.yellow('  Waiting for deployment...'));
+                        await new Promise((resolve) => setTimeout(resolve, 3000));
+
+                        await pollDeploymentStatus(
+                          bucketSlug,
+                          currentRepo.name,
+                          `https://github.com/${currentRepo.owner}/${currentRepo.name}`
+                        );
+                      } catch (deployError) {
+                        console.log(chalk.red(`  ✗ Failed to trigger redeploy: ${(deployError as Error).message}`));
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (error) {
+              if (verbose) {
+                console.log(chalk.dim(`  [DEBUG] Env var check error: ${(error as Error).message}`));
+              }
+              // Don't block on env var errors - this is a nice-to-have feature
+              console.log(chalk.dim('  Could not check environment variables. You may need to configure them manually.'));
+            }
+          }
+        } // End of if (!skipDeploymentPolling)
 
         // Check if AI response contains content to add to Cosmic CMS
         const extractedContent = extractContentFromResponse(fullText);

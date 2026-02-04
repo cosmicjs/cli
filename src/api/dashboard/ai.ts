@@ -253,6 +253,37 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
 // AI Repository Update with Streaming
 // ============================================================================
 
+export interface EnvVarFromBackend {
+  key: string;
+  description: string;
+  required: boolean;
+  detected_in?: string;
+}
+
+export interface PendingOperation {
+  path: string;
+  operation: string;
+  content?: string;
+}
+
+export interface RepositoryPendingOperations {
+  operations: PendingOperation[];
+  commit_message: string;
+  branch: string;
+  repo_full_name: string;
+}
+
+export interface RepositoryUpdateProgress {
+  stage: string;
+  message?: string;
+  percentage?: number;
+  env_vars?: EnvVarFromBackend[];
+  repository_id?: string;
+  required_before_deploy?: boolean;
+  env_vars_pending?: boolean;
+  pending_operations?: RepositoryPendingOperations;
+}
+
 export interface RepositoryUpdateOptions {
   repositoryOwner: string;
   repositoryName: string;
@@ -265,12 +296,20 @@ export interface RepositoryUpdateOptions {
   buildLogs?: string;
   chatMode?: 'agent' | 'ask';
   onChunk?: (chunk: string) => void;
-  onProgress?: (progress: { stage: string; message?: string; percentage?: number }) => void;
+  onProgress?: (progress: RepositoryUpdateProgress) => void;
   onComplete?: (fullText: string, requestId?: string) => void;
   onError?: (error: Error) => void;
 }
 
-export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions): Promise<{ text: string; requestId?: string }> {
+export interface RepositoryUpdateResult {
+  text: string;
+  requestId?: string;
+  envVarsPending?: boolean;
+  envVars?: EnvVarFromBackend[];
+  pendingOperations?: RepositoryPendingOperations;
+}
+
+export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions): Promise<RepositoryUpdateResult> {
   const {
     repositoryOwner,
     repositoryName,
@@ -323,6 +362,10 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
 
   let fullText = '';
   let requestId: string | undefined;
+  // Track pending operations and env vars for two-phase deployment
+  let envVarsPending = false;
+  let detectedEnvVars: EnvVarFromBackend[] | undefined;
+  let pendingOperations: RepositoryPendingOperations | undefined;
 
   try {
     const response = await fetch(endpoint, {
@@ -379,12 +422,41 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
                 onChunk?.(textContent);
               }
 
+              // Track env_vars_pending and pending_operations from backend
+              if (data.env_vars_pending || data.details?.env_vars_pending) {
+                envVarsPending = true;
+              }
+              if (data.env_vars || data.details?.env_vars) {
+                detectedEnvVars = data.env_vars || data.details?.env_vars;
+              }
+              if (data.pending_operations || data.details?.pending_operations) {
+                pendingOperations = data.pending_operations || data.details?.pending_operations;
+              }
+
               if (data.progress || data.stage) {
-                onProgress?.({
+                const progressData: RepositoryUpdateProgress = {
                   stage: data.stage || 'updating',
                   message: data.message || data.progress?.message,
                   percentage: data.progress?.percentage,
-                });
+                  // Pass env vars data for env_vars_required events
+                  env_vars: data.env_vars || data.progress?.env_vars || data.details?.env_vars,
+                  repository_id: data.repository_id || data.progress?.repository_id,
+                  required_before_deploy: data.required_before_deploy || data.progress?.required_before_deploy,
+                  env_vars_pending: data.env_vars_pending || data.details?.env_vars_pending,
+                  pending_operations: data.pending_operations || data.details?.pending_operations,
+                };
+                onProgress?.(progressData);
+
+                // Also capture from progress data
+                if (progressData.env_vars_pending) {
+                  envVarsPending = true;
+                }
+                if (progressData.env_vars && progressData.env_vars.length > 0) {
+                  detectedEnvVars = progressData.env_vars;
+                }
+                if (progressData.pending_operations) {
+                  pendingOperations = progressData.pending_operations;
+                }
               }
             } catch {
               fullText += dataContent;
@@ -418,9 +490,100 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
     }
 
     onComplete?.(fullText, requestId);
-    return { text: fullText, requestId };
+    return {
+      text: fullText,
+      requestId,
+      envVarsPending,
+      envVars: detectedEnvVars,
+      pendingOperations,
+    };
   } catch (error) {
     onError?.(error as Error);
     throw error;
+  }
+}
+
+// ============================================================================
+// Commit Pending Operations (after env vars are configured)
+// ============================================================================
+
+export interface CommitPendingOptions {
+  bucketSlug: string;
+  operations: PendingOperation[];
+  commitMessage: string;
+  branch: string;
+  repoFullName: string;
+  repositoryId?: string;
+}
+
+export interface CommitPendingResult {
+  success: boolean;
+  commit_sha?: string;
+  commit_url?: string;
+  error?: string;
+  message?: string;
+}
+
+/**
+ * Commit pending operations after environment variables have been configured.
+ * This is called after the initial repository update was blocked due to missing env vars.
+ */
+export async function commitPendingOperations(options: CommitPendingOptions): Promise<CommitPendingResult> {
+  const {
+    bucketSlug,
+    operations,
+    commitMessage,
+    branch,
+    repoFullName,
+    repositoryId,
+  } = options;
+
+  const { getApiUrl } = await import('../../config/store.js');
+  const { getAuthHeaders } = await import('../../auth/manager.js');
+  const baseUrl = getApiUrl();
+  const authHeaders = getAuthHeaders();
+
+  const endpoint = `${baseUrl}/ai/repository-update/commit-pending?slug=${bucketSlug}`;
+
+  const headers: Record<string, string> = {
+    ...authHeaders,
+    'Content-Type': 'application/json',
+    'Origin': 'https://app.cosmicjs.com',
+    'User-Agent': 'CosmicCLI/1.0.0',
+  };
+
+  const requestPayload = {
+    operations,
+    commit_message: commitMessage,
+    branch,
+    repo_full_name: repoFullName,
+    repository_id: repositoryId,
+    skip_env_var_check: true, // We've already verified env vars are configured
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestPayload),
+    });
+
+    const result = await response.json() as CommitPendingResult;
+
+    if (!response.ok) {
+      return {
+        success: false,
+        error: result.error || 'COMMIT_FAILED',
+        message: result.message || `HTTP error: ${response.status}`,
+      };
+    }
+
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      error: 'NETWORK_ERROR',
+      message: (error as Error).message,
+    };
   }
 }
