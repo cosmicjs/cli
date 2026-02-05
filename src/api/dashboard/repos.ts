@@ -389,3 +389,105 @@ export async function deleteRepositoryEnvVar(
     { bucketSlug }
   );
 }
+
+// ============================================================================
+// Domain Management (Vercel custom domains for repository deployments)
+// ============================================================================
+
+export interface RepositoryDomain {
+  name: string;
+  verified?: boolean;
+  apexName?: string;
+  verification?: {
+    verified: boolean;
+    misconfigured?: boolean;
+    verification?: Array<{ type: string; domain: string; value: string }>;
+    requirements?: {
+      txtVerification?: Record<string, string>;
+      verificationRecord?: { type: string; name: string; value: string };
+    };
+  };
+  configuration?: {
+    configured: boolean;
+    misconfigured?: boolean;
+    nameservers?: string[];
+    txtVerification?: Record<string, string>;
+    cnames?: string[];
+    aRecords?: string[];
+    aaaaRecords?: string[];
+  };
+  redirect?: string | null;
+  gitBranch?: string | null;
+}
+
+export interface ListRepositoryDomainsResponse {
+  repository_id: string;
+  vercel_project_id: string;
+  domains: RepositoryDomain[];
+}
+
+export async function listRepositoryDomains(
+  bucketSlug: string,
+  repositoryId: string
+): Promise<ListRepositoryDomainsResponse> {
+  const response = await get<ListRepositoryDomainsResponse>(
+    `/repositories/${repositoryId}/domains`,
+    { bucketSlug }
+  );
+  return response;
+}
+
+export interface AddDomainData {
+  domain: string;
+  redirect?: string;
+  redirectStatusCode?: 301 | 302 | 307 | 308;
+}
+
+export async function addRepositoryDomain(
+  bucketSlug: string,
+  repositoryId: string,
+  data: AddDomainData
+): Promise<{ repository_id: string; vercel_project_id: string; domain: RepositoryDomain }> {
+  const response = await post<{
+    repository_id: string;
+    vercel_project_id: string;
+    domain: RepositoryDomain;
+  }>(`/repositories/${repositoryId}/domains`, data, { bucketSlug });
+  return response;
+}
+
+export interface UpdateDomainData {
+  redirect?: string | null;
+  redirectStatusCode?: 301 | 302 | 307 | 308;
+}
+
+export async function updateRepositoryDomain(
+  bucketSlug: string,
+  repositoryId: string,
+  domain: string,
+  data: UpdateDomainData
+): Promise<{ repository_id: string; vercel_project_id: string; domain: RepositoryDomain }> {
+  const response = await patch<{
+    repository_id: string;
+    vercel_project_id: string;
+    domain: RepositoryDomain;
+  }>(`/repositories/${repositoryId}/domains/${encodeURIComponent(domain)}`, data, {
+    bucketSlug,
+  });
+  return response;
+}
+
+export async function removeRepositoryDomain(
+  bucketSlug: string,
+  repositoryId: string,
+  domain: string
+): Promise<{ repository_id: string; vercel_project_id: string; message: string }> {
+  const response = await del<{
+    repository_id: string;
+    vercel_project_id: string;
+    message: string;
+  }>(`/repositories/${repositoryId}/domains/${encodeURIComponent(domain)}`, {
+    bucketSlug,
+  });
+  return response;
+}

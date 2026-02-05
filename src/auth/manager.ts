@@ -7,6 +7,7 @@ import {
   getCredentials,
   setCredentials,
   clearCredentials,
+  clearContext,
   isAuthenticated,
   getApiUrl,
 } from '../config/store.js';
@@ -216,10 +217,11 @@ export function getBucketKeys(): { readKey?: string; writeKey?: string } {
 }
 
 /**
- * Logout - clear all credentials
+ * Logout - clear all credentials and context
  */
 export function logout(): void {
   clearCredentials();
+  clearContext();
 }
 
 /**

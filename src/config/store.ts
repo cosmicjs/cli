@@ -259,6 +259,18 @@ export function getDefaultModel(): string {
 }
 
 /**
+ * Clear the current context (workspace/project/bucket)
+ * Called on logout to prevent context from persisting across different accounts
+ */
+export function clearContext(): void {
+  clearConfigValue('currentWorkspace');
+  clearConfigValue('currentWorkspaceId');
+  clearConfigValue('currentProject');
+  clearConfigValue('currentProjectId');
+  clearConfigValue('currentBucket');
+}
+
+/**
  * Set the current context (workspace/project/bucket)
  */
 export function setContext(
@@ -334,5 +346,6 @@ export default {
   getCurrentProjectId,
   getDefaultModel,
   setContext,
+  clearContext,
   getConfigDir,
 };

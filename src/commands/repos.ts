@@ -1107,7 +1107,7 @@ async function listEnvVars(
     if (envVars.length === 0) {
       display.info('No environment variables configured');
       display.newline();
-      display.info(`Add one with: ${chalk.cyan(`cosmic repos env add ${repositoryId} -k KEY -v VALUE`)}`);
+      display.info(`Add one with: ${chalk.cyan(`cosmic repos env create ${repositoryId} -k KEY -v VALUE`)}`);
       return;
     }
 
@@ -1294,6 +1294,197 @@ async function deleteEnvVar(
 }
 
 /**
+ * List domains for a repository
+ */
+async function listDomains(
+  repositoryId: string,
+  options: { json?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'list');
+
+  try {
+    spinner.start('Loading domains...');
+    const result = await api.listRepositoryDomains(bucketSlug, repositoryId);
+    spinner.succeed(`Found ${result.domains.length} domain(s)`);
+
+    if (result.domains.length === 0) {
+      display.info('No domains configured');
+      display.info(`Add a domain with: ${chalk.cyan(`cosmic repos domains create ${repositoryId} <domain>`)}`);
+      return;
+    }
+
+    if (options.json) {
+      display.json(result);
+      return;
+    }
+
+    const table = display.createTable({
+      head: ['Domain', 'Verified', 'Redirect'],
+    });
+
+    for (const domain of result.domains) {
+      const verified = domain.verification?.verified ?? domain.verified;
+      const status = verified ? chalk.green('✓ Yes') : chalk.yellow('Pending');
+      table.push([
+        chalk.cyan(domain.name),
+        status,
+        domain.redirect || chalk.dim('-'),
+      ]);
+    }
+
+    console.log(table.toString());
+  } catch (error) {
+    spinner.fail('Failed to load domains');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Add a domain to a repository
+ */
+async function addDomain(
+  repositoryId: string,
+  domain: string,
+  options: {
+    redirect?: string;
+    redirectStatus?: number;
+    json?: boolean;
+  }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'add');
+
+  if (!domain || domain.length < 3) {
+    display.error('Domain name is required (e.g. www.example.com)');
+    process.exit(1);
+  }
+
+  try {
+    spinner.start(`Adding domain ${domain}...`);
+    const result = await api.addRepositoryDomain(bucketSlug, repositoryId, {
+      domain,
+      redirect: options.redirect,
+      redirectStatusCode: options.redirectStatus as 301 | 302 | 307 | 308 | undefined,
+    });
+    spinner.succeed('Domain added');
+
+    if (options.json) {
+      display.json(result);
+      return;
+    }
+
+    display.keyValue('Domain', chalk.cyan(result.domain?.name ?? domain));
+    const verified = result.domain?.verified ?? result.domain?.verification?.verified;
+    if (verified === false) {
+      display.warning('Domain verification pending - add the required DNS records in your DNS provider');
+    }
+  } catch (error) {
+    spinner.fail('Failed to add domain');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Edit/update a domain for a repository
+ */
+async function editDomain(
+  repositoryId: string,
+  domain: string,
+  options: {
+    redirect?: string;
+    redirectStatus?: number;
+    json?: boolean;
+  }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'edit');
+
+  if (!domain || domain.length < 3) {
+    display.error('Domain name is required');
+    process.exit(1);
+  }
+
+  const data: { redirect?: string | null; redirectStatusCode?: number } = {};
+  if (options.redirect !== undefined) {
+    data.redirect = options.redirect || null;
+  }
+  if (options.redirectStatus !== undefined) {
+    data.redirectStatusCode = options.redirectStatus;
+  }
+
+  if (Object.keys(data).length === 0) {
+    display.error('Specify --redirect or --redirect-status to update');
+    process.exit(1);
+  }
+
+  try {
+    spinner.start(`Updating domain ${domain}...`);
+    const result = await api.updateRepositoryDomain(bucketSlug, repositoryId, domain, data);
+    spinner.succeed('Domain updated');
+
+    if (options.json) {
+      display.json(result);
+      return;
+    }
+
+    display.keyValue('Domain', chalk.cyan(result.domain.name));
+    if (result.domain.redirect) {
+      display.keyValue('Redirect', result.domain.redirect);
+    }
+  } catch (error) {
+    spinner.fail('Failed to update domain');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Remove a domain from a repository
+ */
+async function deleteDomain(
+  repositoryId: string,
+  domain: string,
+  options: { force?: boolean; json?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'delete');
+
+  if (!domain || domain.length < 3) {
+    display.error('Domain name is required');
+    process.exit(1);
+  }
+
+  if (!options.force) {
+    const confirmed = await prompts.confirm({
+      message: `Remove domain "${domain}" from this repository?`,
+      initial: false,
+    });
+
+    if (!confirmed) {
+      display.info('Cancelled');
+      return;
+    }
+  }
+
+  try {
+    spinner.start('Removing domain...');
+    const result = await api.removeRepositoryDomain(bucketSlug, repositoryId, domain);
+    spinner.succeed('Domain removed');
+
+    if (options.json) {
+      display.json(result);
+    }
+  } catch (error) {
+    spinner.fail('Failed to remove domain');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Create repos commands
  */
 export function createReposCommands(program: Command): void {
@@ -1458,7 +1649,8 @@ export function createReposCommands(program: Command): void {
     });
 
   envCmd
-    .command('add <repositoryId>')
+    .command('create <repositoryId>')
+    .alias('add')
     .description('Add an environment variable')
     .option('-k, --key <key>', 'Environment variable key')
     .option('-v, --value <value>', 'Value')
@@ -1466,7 +1658,7 @@ export function createReposCommands(program: Command): void {
     .option('--type <type>', 'Type: encrypted or plain', 'encrypted')
     .option('--json', 'Output as JSON')
     .action((repositoryId, options) => {
-      validateRepositoryId(repositoryId, 'add');
+      validateRepositoryId(repositoryId, 'create');
       return addEnvVar(repositoryId, options);
     });
 
@@ -1491,6 +1683,67 @@ export function createReposCommands(program: Command): void {
     .action((repositoryId, key, options) => {
       validateRepositoryId(repositoryId, 'delete');
       return deleteEnvVar(repositoryId, key, options);
+    });
+
+  // Domains subcommand (Vercel custom domains)
+  const domainsCmd = reposCmd
+    .command('domains')
+    .description('Manage custom domains for repository deployments (Vercel)');
+
+  domainsCmd
+    .command('list <repositoryId>')
+    .alias('ls')
+    .description('List domains for a repository')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, options) => {
+      validateRepositoryId(repositoryId, 'list');
+      return listDomains(repositoryId, options);
+    });
+
+  domainsCmd
+    .command('create <repositoryId> <domain>')
+    .alias('add')
+    .description('Add a domain to a repository')
+    .option('-r, --redirect <url>', 'Redirect URL or domain')
+    .option('--redirect-status <code>', 'Redirect status code (301, 302, 307, 308)', '301')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, domain, options) => {
+      validateRepositoryId(repositoryId, 'create');
+      const redirectStatus = options.redirectStatus
+        ? parseInt(options.redirectStatus, 10)
+        : undefined;
+      return addDomain(repositoryId, domain, {
+        ...options,
+        redirectStatus: redirectStatus as 301 | 302 | 307 | 308 | undefined,
+      });
+    });
+
+  domainsCmd
+    .command('edit <repositoryId> <domain>')
+    .description('Update domain settings (redirect)')
+    .option('-r, --redirect <url>', 'Redirect URL or domain (empty to remove)')
+    .option('--redirect-status <code>', 'Redirect status code (301, 302, 307, 308)')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, domain, options) => {
+      validateRepositoryId(repositoryId, 'edit');
+      const redirectStatus = options.redirectStatus
+        ? parseInt(options.redirectStatus, 10)
+        : undefined;
+      return editDomain(repositoryId, domain, {
+        ...options,
+        redirectStatus,
+      });
+    });
+
+  domainsCmd
+    .command('delete <repositoryId> <domain>')
+    .alias('rm')
+    .description('Remove a domain from a repository')
+    .option('-f, --force', 'Skip confirmation')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, domain, options) => {
+      validateRepositoryId(repositoryId, 'delete');
+      return deleteDomain(repositoryId, domain, options);
     });
 
   // Default action for repos command (list)

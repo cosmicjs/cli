@@ -567,15 +567,16 @@ cosmic repos env ls <repoId>                 # Alias
 cosmic repos env list <repoId> --json
 ```
 
-#### `cosmic repos env add <repoId>`
+#### `cosmic repos env create <repoId>`
 
 Add an environment variable.
 
 ```bash
-cosmic repos env add <repoId>
-cosmic repos env add <repoId> -k API_KEY -v secret123
-cosmic repos env add <repoId> -k API_KEY -v secret123 -t production,preview
-cosmic repos env add <repoId> -k NEXT_PUBLIC_SITE_URL -v https://example.com --type plain
+cosmic repos env create <repoId>
+cosmic repos env add <repoId>                  # Alias
+cosmic repos env create <repoId> -k API_KEY -v secret123
+cosmic repos env create <repoId> -k API_KEY -v secret123 -t production,preview
+cosmic repos env create <repoId> -k NEXT_PUBLIC_SITE_URL -v https://example.com --type plain
 ```
 
 **Options:**
@@ -614,6 +615,75 @@ cosmic repos env delete <repoId> API_KEY
 cosmic repos env rm <repoId> API_KEY         # Alias
 cosmic repos env delete <repoId> API_KEY -f  # Skip confirmation
 ```
+
+### Custom Domains (Vercel Deployment)
+
+Manage custom domains for repository deployments. Domains are added to the Vercel project linked to the repository.
+
+#### `cosmic repos domains list <repoId>`
+
+List domains for a repository.
+
+```bash
+cosmic repos domains list <repoId>
+cosmic repos domains ls <repoId>             # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+#### `cosmic repos domains create <repoId> <domain>`
+
+Add a domain to a repository.
+
+```bash
+cosmic repos domains create <repoId> www.example.com
+cosmic repos domains add <repoId> www.example.com     # Alias
+cosmic repos domains create <repoId> www.example.com -r example.com
+cosmic repos domains create <repoId> blog.example.com --redirect-status 302
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-r, --redirect <url>` | Redirect URL or domain |
+| `--redirect-status <code>` | Redirect status code: `301`, `302`, `307`, `308` (default: 301) |
+| `--json` | Output as JSON |
+
+#### `cosmic repos domains edit <repoId> <domain>`
+
+Update domain settings (redirect configuration).
+
+```bash
+cosmic repos domains edit <repoId> www.example.com -r https://example.com
+cosmic repos domains edit <repoId> www.example.com -r ""   # Remove redirect
+cosmic repos domains edit <repoId> www.example.com --redirect-status 302
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-r, --redirect <url>` | Redirect URL or domain (empty to remove redirect) |
+| `--redirect-status <code>` | Redirect status code: `301`, `302`, `307`, `308` |
+| `--json` | Output as JSON |
+
+#### `cosmic repos domains delete <repoId> <domain>`
+
+Remove a domain from a repository.
+
+```bash
+cosmic repos domains delete <repoId> www.example.com
+cosmic repos domains rm <repoId> www.example.com           # Alias
+cosmic repos domains delete <repoId> www.example.com -f    # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+| `--json` | Output as JSON |
 
 ### Branch Management
 

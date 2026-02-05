@@ -119,6 +119,14 @@ export {
   type RepositoryEnvVar,
   type AddEnvVarData,
   type UpdateEnvVarData,
+  listRepositoryDomains,
+  addRepositoryDomain,
+  updateRepositoryDomain,
+  removeRepositoryDomain,
+  type RepositoryDomain,
+  type ListRepositoryDomainsResponse,
+  type AddDomainData,
+  type UpdateDomainData,
 } from './repos.js';
 
 // Deployments

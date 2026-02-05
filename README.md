@@ -201,9 +201,16 @@ cosmic repos pr close <repoId> <number>        # Close pull request
 
 # Environment variables (Vercel deployment)
 cosmic repos env list <repoId>                 # List env vars
-cosmic repos env add <repoId> -k KEY -v VALUE  # Add env var
+cosmic repos env create <repoId> -k KEY -v VALUE  # Add env var (alias: add)
 cosmic repos env edit <repoId> KEY -v VALUE    # Edit env var
 cosmic repos env delete <repoId> KEY           # Delete env var
+
+# Custom domains (Vercel deployment)
+cosmic repos domains list <repoId>             # List domains
+cosmic repos domains create <repoId> <domain>  # Add domain (alias: add)
+cosmic repos domains create <repoId> www.example.com --redirect example.com  # Add with redirect
+cosmic repos domains edit <repoId> <domain> -r <url>   # Update redirect
+cosmic repos domains delete <repoId> <domain>  # Remove domain
 ```
 
 ### Deployments
