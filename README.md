@@ -198,6 +198,12 @@ cosmic repos pr get <repoId> <number>          # Get PR details
 cosmic repos pr create <repoId>                # Create pull request
 cosmic repos pr merge <repoId> <number>        # Merge pull request
 cosmic repos pr close <repoId> <number>        # Close pull request
+
+# Environment variables (Vercel deployment)
+cosmic repos env list <repoId>                 # List env vars
+cosmic repos env add <repoId> -k KEY -v VALUE  # Add env var
+cosmic repos env edit <repoId> KEY -v VALUE    # Edit env var
+cosmic repos env delete <repoId> KEY           # Delete env var
 ```
 
 ### Deployments

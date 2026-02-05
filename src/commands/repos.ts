@@ -1083,6 +1083,216 @@ async function closePullRequest(
   }
 }
 
+// ============================================================================
+// Environment Variables
+// ============================================================================
+
+const DEFAULT_TARGET = ['production', 'preview', 'development'];
+
+/**
+ * List environment variables for a repository
+ */
+async function listEnvVars(
+  repositoryId: string,
+  options: { json?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'list');
+
+  try {
+    spinner.start('Loading environment variables...');
+    const envVars = await api.getRepositoryEnvVars(bucketSlug, repositoryId);
+    spinner.succeed(`Found ${envVars.length} environment variable(s)`);
+
+    if (envVars.length === 0) {
+      display.info('No environment variables configured');
+      display.newline();
+      display.info(`Add one with: ${chalk.cyan(`cosmic repos env add ${repositoryId} -k KEY -v VALUE`)}`);
+      return;
+    }
+
+    if (options.json) {
+      display.json(envVars);
+      return;
+    }
+
+    const table = display.createTable({
+      head: ['Key', 'Target', 'Type', 'Value'],
+    });
+
+    for (const env of envVars) {
+      const targets = (env.target || DEFAULT_TARGET).join(', ');
+      const type = env.type || 'encrypted';
+      const valueDisplay = env.value
+        ? chalk.dim(env.value.length > 20 ? env.value.substring(0, 20) + '...' : env.value)
+        : chalk.yellow('(not set)');
+      table.push([chalk.cyan(env.key), chalk.dim(targets), type, valueDisplay]);
+    }
+
+    console.log(table.toString());
+  } catch (error) {
+    spinner.fail('Failed to load environment variables');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Add environment variable to a repository
+ */
+async function addEnvVar(
+  repositoryId: string,
+  options: {
+    key?: string;
+    value?: string;
+    target?: string;
+    type?: 'encrypted' | 'plain';
+    json?: boolean;
+  }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'add');
+
+  const key =
+    options.key ||
+    (await prompts.text({
+      message: 'Environment variable key:',
+      required: true,
+      validate: (v) => {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) {
+          return 'Key must start with a letter or underscore and contain only alphanumerics';
+        }
+        return true;
+      },
+    }));
+
+  const value =
+    options.value ||
+    (await prompts.text({
+      message: 'Value:',
+      required: true,
+    }));
+
+  const targetStr = options.target || 'production,preview,development';
+  const target = targetStr.split(',').map((t) => t.trim()).filter(Boolean);
+  const type = options.type || 'encrypted';
+
+  try {
+    spinner.start(`Adding ${chalk.cyan(key)}...`);
+    await api.addRepositoryEnvVar(bucketSlug, repositoryId, {
+      key,
+      value,
+      target: target.length > 0 ? target : DEFAULT_TARGET,
+      type,
+    });
+    spinner.succeed(`Added ${chalk.cyan(key)}`);
+
+    if (options.json) {
+      display.json({ key, added: true });
+    }
+  } catch (error) {
+    spinner.fail('Failed to add environment variable');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Edit (update) environment variable for a repository
+ */
+async function editEnvVar(
+  repositoryId: string,
+  key: string,
+  options: {
+    value?: string;
+    target?: string;
+    type?: 'encrypted' | 'plain';
+    json?: boolean;
+  }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'edit');
+
+  if (!key) {
+    display.error('Environment variable key is required');
+    display.info(`Usage: ${chalk.cyan('cosmic repos env edit <repositoryId> <key> -v VALUE')}`);
+    process.exit(1);
+  }
+
+  const value = options.value;
+  const targetStr = options.target;
+  const target = targetStr ? targetStr.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+  const type = options.type;
+
+  if (!value && !target && !type) {
+    display.error('At least one of --value, --target, or --type is required');
+    display.info(`Usage: ${chalk.cyan('cosmic repos env edit <repositoryId> <key> -v VALUE')}`);
+    process.exit(1);
+  }
+
+  const updateData: { value?: string; target?: string[]; type?: 'encrypted' | 'plain' } = {};
+  if (value !== undefined) updateData.value = value;
+  if (target !== undefined) updateData.target = target;
+  if (type !== undefined) updateData.type = type;
+
+  try {
+    spinner.start(`Updating ${chalk.cyan(key)}...`);
+    await api.updateRepositoryEnvVar(bucketSlug, repositoryId, key, updateData);
+    spinner.succeed(`Updated ${chalk.cyan(key)}`);
+
+    if (options.json) {
+      display.json({ key, updated: true });
+    }
+  } catch (error) {
+    spinner.fail('Failed to update environment variable');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Delete environment variable from a repository
+ */
+async function deleteEnvVar(
+  repositoryId: string,
+  key: string,
+  options: { force?: boolean; json?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+  validateRepositoryId(repositoryId, 'delete');
+
+  if (!key) {
+    display.error('Environment variable key is required');
+    display.info(`Usage: ${chalk.cyan('cosmic repos env delete <repositoryId> <key>')}`);
+    process.exit(1);
+  }
+
+  if (!options.force) {
+    const confirmed = await prompts.confirm({
+      message: `Delete environment variable "${key}"?`,
+    });
+
+    if (!confirmed) {
+      display.info('Cancelled');
+      return;
+    }
+  }
+
+  try {
+    spinner.start(`Deleting ${chalk.cyan(key)}...`);
+    await api.deleteRepositoryEnvVar(bucketSlug, repositoryId, key);
+    spinner.succeed(`Deleted ${chalk.cyan(key)}`);
+
+    if (options.json) {
+      display.json({ key, deleted: true });
+    }
+  } catch (error) {
+    spinner.fail('Failed to delete environment variable');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
 /**
  * Create repos commands
  */
@@ -1230,6 +1440,57 @@ export function createReposCommands(program: Command): void {
     .action((repositoryId, pullNumber, options) => {
       validateRepositoryId(repositoryId, 'close');
       return closePullRequest(repositoryId, pullNumber, options);
+    });
+
+  // Environment variables subcommand
+  const envCmd = reposCmd
+    .command('env')
+    .description('Manage repository environment variables (Vercel deployment)');
+
+  envCmd
+    .command('list <repositoryId>')
+    .alias('ls')
+    .description('List environment variables for a repository')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, options) => {
+      validateRepositoryId(repositoryId, 'list');
+      return listEnvVars(repositoryId, options);
+    });
+
+  envCmd
+    .command('add <repositoryId>')
+    .description('Add an environment variable')
+    .option('-k, --key <key>', 'Environment variable key')
+    .option('-v, --value <value>', 'Value')
+    .option('-t, --target <targets>', 'Target environments (comma-separated: production,preview,development)', 'production,preview,development')
+    .option('--type <type>', 'Type: encrypted or plain', 'encrypted')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, options) => {
+      validateRepositoryId(repositoryId, 'add');
+      return addEnvVar(repositoryId, options);
+    });
+
+  envCmd
+    .command('edit <repositoryId> <key>')
+    .description('Edit an environment variable')
+    .option('-v, --value <value>', 'New value')
+    .option('-t, --target <targets>', 'Target environments (comma-separated)')
+    .option('--type <type>', 'Type: encrypted or plain')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, key, options) => {
+      validateRepositoryId(repositoryId, 'edit');
+      return editEnvVar(repositoryId, key, options);
+    });
+
+  envCmd
+    .command('delete <repositoryId> <key>')
+    .alias('rm')
+    .description('Delete an environment variable')
+    .option('-f, --force', 'Skip confirmation')
+    .option('--json', 'Output as JSON')
+    .action((repositoryId, key, options) => {
+      validateRepositoryId(repositoryId, 'delete');
+      return deleteEnvVar(repositoryId, key, options);
     });
 
   // Default action for repos command (list)

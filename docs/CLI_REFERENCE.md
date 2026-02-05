@@ -553,6 +553,68 @@ remote: Enumerating objects: 150, done.
     3. npm run dev # Start development server
 ```
 
+### Environment Variables (Vercel Deployment)
+
+Manage environment variables for repository deployments. These are synced to Vercel when you deploy.
+
+#### `cosmic repos env list <repoId>`
+
+List environment variables for a repository.
+
+```bash
+cosmic repos env list <repoId>
+cosmic repos env ls <repoId>                 # Alias
+cosmic repos env list <repoId> --json
+```
+
+#### `cosmic repos env add <repoId>`
+
+Add an environment variable.
+
+```bash
+cosmic repos env add <repoId>
+cosmic repos env add <repoId> -k API_KEY -v secret123
+cosmic repos env add <repoId> -k API_KEY -v secret123 -t production,preview
+cosmic repos env add <repoId> -k NEXT_PUBLIC_SITE_URL -v https://example.com --type plain
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-k, --key <key>` | Environment variable key |
+| `-v, --value <value>` | Value |
+| `-t, --target <targets>` | Target environments: `production`, `preview`, `development` (comma-separated, default: all) |
+| `--type <type>` | `encrypted` (default) or `plain` (for client-side vars like `NEXT_PUBLIC_*`) |
+| `--json` | Output as JSON |
+
+#### `cosmic repos env edit <repoId> <key>`
+
+Edit an existing environment variable.
+
+```bash
+cosmic repos env edit <repoId> API_KEY -v new-value
+cosmic repos env edit <repoId> API_KEY -t production
+cosmic repos env edit <repoId> API_KEY --type plain
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-v, --value <value>` | New value |
+| `-t, --target <targets>` | Target environments (comma-separated) |
+| `--type <type>` | `encrypted` or `plain` |
+| `--json` | Output as JSON |
+
+#### `cosmic repos env delete <repoId> <key>`
+
+Delete an environment variable.
+
+```bash
+cosmic repos env delete <repoId> API_KEY
+cosmic repos env rm <repoId> API_KEY         # Alias
+cosmic repos env delete <repoId> API_KEY -f  # Skip confirmation
+```
+
 ### Branch Management
 
 #### `cosmic repos branches <repoId> list`

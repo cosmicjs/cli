@@ -318,6 +318,12 @@ export interface AddEnvVarData {
   type: 'encrypted' | 'plain';
 }
 
+export interface UpdateEnvVarData {
+  value?: string;
+  target?: string[];
+  type?: 'encrypted' | 'plain';
+}
+
 /**
  * Get environment variables for a repository
  */
@@ -325,11 +331,17 @@ export async function getRepositoryEnvVars(
   bucketSlug: string,
   repositoryId: string
 ): Promise<RepositoryEnvVar[]> {
-  const response = await get<{ envs?: RepositoryEnvVar[]; env?: RepositoryEnvVar[] }>(
-    `/repositories/${repositoryId}/env`,
-    { bucketSlug }
+  const response = await get<{
+    envs?: RepositoryEnvVar[];
+    env?: RepositoryEnvVar[];
+    environment_variables?: RepositoryEnvVar[];
+  }>(`/repositories/${repositoryId}/env`, { bucketSlug });
+  return (
+    response.environment_variables ||
+    response.envs ||
+    response.env ||
+    []
   );
-  return response.envs || response.env || [];
 }
 
 /**
@@ -346,4 +358,34 @@ export async function addRepositoryEnvVar(
     { bucketSlug }
   );
   return response;
+}
+
+/**
+ * Update environment variable for a repository
+ */
+export async function updateRepositoryEnvVar(
+  bucketSlug: string,
+  repositoryId: string,
+  key: string,
+  data: UpdateEnvVarData
+): Promise<void> {
+  await patch(
+    `/repositories/${repositoryId}/env/${encodeURIComponent(key)}`,
+    data,
+    { bucketSlug }
+  );
+}
+
+/**
+ * Delete environment variable from a repository
+ */
+export async function deleteRepositoryEnvVar(
+  bucketSlug: string,
+  repositoryId: string,
+  key: string
+): Promise<void> {
+  await del(
+    `/repositories/${repositoryId}/env/${encodeURIComponent(key)}`,
+    { bucketSlug }
+  );
 }

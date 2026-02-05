@@ -107,6 +107,8 @@ export {
   reopenPullRequest,
   getRepositoryEnvVars,
   addRepositoryEnvVar,
+  updateRepositoryEnvVar,
+  deleteRepositoryEnvVar,
   type Repository,
   type Branch,
   type CreateRepositoryData,
@@ -116,6 +118,7 @@ export {
   type UpdatePullRequestData,
   type RepositoryEnvVar,
   type AddEnvVarData,
+  type UpdateEnvVarData,
 } from './repos.js';
 
 // Deployments
