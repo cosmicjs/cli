@@ -16,21 +16,21 @@ import * as api from '../api/dashboard.js';
  */
 async function deployRepository(
   repositoryId: string,
-  options: { json?: boolean; watch?: boolean }
+  options: { json?: boolean; watch?: boolean; branch?: string }
 ): Promise<void> {
   const bucketSlug = requireBucket();
 
   // Get repository info
   let repoName = repositoryId;
   let vercelProjectId: string | undefined;
-  
+
   try {
     spinner.start('Loading repository...');
     const repo = await api.getRepository(bucketSlug, repositoryId);
     repoName = repo.repository_name;
     vercelProjectId = repo.vercel_project_id;
     spinner.succeed();
-    
+
     display.keyValue('Repository', chalk.cyan(repoName));
     display.keyValue('Framework', repo.framework || 'other');
   } catch (error) {
@@ -52,8 +52,21 @@ async function deployRepository(
 
   try {
     spinner.start('Starting deployment...');
-    const result = await api.deployRepository(bucketSlug, repositoryId);
-    
+
+    // Use redeploy with branch when repo has Vercel project and branch is specified
+    let result: { success: boolean; deployment_url?: string; vercel_project_id?: string };
+    if (options.branch && vercelProjectId) {
+      result = await api.redeployProject(vercelProjectId, { branch: options.branch });
+      // Normalize to same shape as deployRepository
+      result = {
+        success: result.success,
+        deployment_url: result.deploymentUrl ?? result.deployment_url,
+        vercel_project_id: vercelProjectId,
+      };
+    } else {
+      result = await api.deployRepository(bucketSlug, repositoryId);
+    }
+
     if (!result.success) {
       spinner.fail('Deployment failed');
       return;
@@ -77,7 +90,7 @@ async function deployRepository(
     // Watch deployment if requested
     if (options.watch && vercelProjectId) {
       display.newline();
-      await watchDeployment(bucketSlug, vercelProjectId);
+      await watchDeployment(bucketSlug, repositoryId, vercelProjectId);
     } else {
       display.newline();
       display.info(`Watch deployment with: ${chalk.cyan(`cosmic deploy logs ${repositoryId}`)}`);
@@ -94,18 +107,19 @@ async function deployRepository(
  */
 async function watchDeployment(
   bucketSlug: string,
+  repositoryId: string,
   vercelProjectId: string
 ): Promise<void> {
   display.info('Watching deployment...');
-  
+
   let lastState = '';
   let attempts = 0;
   const maxAttempts = 60; // 5 minutes max
-  
+
   while (attempts < maxAttempts) {
     try {
-      const { deployments } = await api.listDeployments(bucketSlug, vercelProjectId, { limit: 1 });
-      
+      const { deployments } = await api.listDeployments(bucketSlug, repositoryId, { limit: 1 });
+
       if (deployments.length === 0) {
         await sleep(5000);
         attempts++;
@@ -113,26 +127,26 @@ async function watchDeployment(
       }
 
       const deployment = deployments[0];
-      
+
       if (deployment.state !== lastState) {
         lastState = deployment.state;
-        
+
         const stateIcon = getStateIcon(deployment.state);
         console.log(`  ${stateIcon} ${deployment.state}`);
-        
+
         if (deployment.state === 'READY') {
           display.newline();
           display.success(`Deployment ready: ${chalk.green(deployment.url)}`);
           return;
         }
-        
+
         if (deployment.state === 'ERROR' || deployment.state === 'CANCELED') {
           display.newline();
           display.error(`Deployment ${deployment.state.toLowerCase()}`);
           return;
         }
       }
-      
+
       await sleep(5000);
       attempts++;
     } catch {
@@ -140,7 +154,7 @@ async function watchDeployment(
       attempts++;
     }
   }
-  
+
   display.warning('Deployment monitoring timed out. Check the dashboard for status.');
 }
 
@@ -157,20 +171,20 @@ async function listDeployments(
     // Get repository to get vercel project ID
     spinner.start('Loading repository...');
     const repo = await api.getRepository(bucketSlug, repositoryId);
-    
+
     if (!repo.vercel_project_id) {
       spinner.fail('Repository has no Vercel project');
-      display.info(`Deploy first with: ${chalk.cyan(`cosmic deploy ${repositoryId}`)}`);
+      display.info(`Deploy first with: ${chalk.cyan(`cosmic deploy start ${repositoryId}`)}`);
       return;
     }
 
     spinner.update('Loading deployments...');
     const { deployments } = await api.listDeployments(
       bucketSlug,
-      repo.vercel_project_id,
+      repositoryId,
       { limit: options.limit || 10 }
     );
-    
+
     spinner.succeed(`Found ${deployments.length} deployment(s)`);
 
     if (deployments.length === 0) {
@@ -217,14 +231,14 @@ async function getDeploymentLogs(
       // Poll for logs
       display.info('Streaming deployment logs...');
       display.newline();
-      
+
       let lastLogCount = 0;
       let attempts = 0;
       const maxAttempts = 120; // 10 minutes max
-      
+
       while (attempts < maxAttempts) {
         const logs = await api.getDeploymentLogs(deploymentId);
-        
+
         // Print new logs
         if (logs.length > lastLogCount) {
           for (let i = lastLogCount; i < logs.length; i++) {
@@ -234,7 +248,7 @@ async function getDeploymentLogs(
           }
           lastLogCount = logs.length;
         }
-        
+
         await sleep(2000);
         attempts++;
       }
@@ -267,6 +281,73 @@ async function getDeploymentLogs(
 }
 
 /**
+ * Redeploy a repository (with optional branch)
+ */
+async function redeployRepository(
+  repositoryId: string,
+  options: { json?: boolean; watch?: boolean; branch?: string }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  try {
+    spinner.start('Loading repository...');
+    const repo = await api.getRepository(bucketSlug, repositoryId);
+    spinner.succeed();
+
+    if (!repo.vercel_project_id) {
+      display.error('Repository has no Vercel project');
+      display.info(`Deploy first with: ${chalk.cyan(`cosmic deploy start ${repositoryId}`)}`);
+      return;
+    }
+
+    // Use specified branch or default to repo's default branch
+    const branch = options.branch || repo.default_branch || 'main';
+
+    const confirmed = await prompts.confirm({
+      message: `Redeploy "${repo.repository_name}"${branch ? ` from branch ${chalk.cyan(branch)}` : ''}?`,
+      initial: true,
+    });
+
+    if (!confirmed) {
+      display.info('Cancelled');
+      return;
+    }
+
+    spinner.start('Starting redeployment...');
+    const result = await api.redeployProject(repo.vercel_project_id, { branch });
+
+    if (!result.success) {
+      spinner.fail('Redeployment failed');
+      display.error(result.message || result.error || 'Unknown error');
+      process.exit(1);
+    }
+
+    spinner.succeed('Redeployment started');
+
+    if (result.deploymentUrl) {
+      display.keyValue('Deployment URL', chalk.green(result.deploymentUrl));
+    }
+
+    if (options.json) {
+      display.json(result);
+      return;
+    }
+
+    if (options.watch) {
+      display.newline();
+      await watchDeployment(bucketSlug, repositoryId, repo.vercel_project_id);
+    } else {
+      display.newline();
+      display.info(`Watch deployment with: ${chalk.cyan(`cosmic deploy logs <deploymentId>`)}`);
+    }
+  } catch (error) {
+    spinner.fail('Failed to redeploy');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Cancel a deployment
  */
 async function cancelDeployment(
@@ -291,7 +372,7 @@ async function cancelDeployment(
   try {
     spinner.start('Cancelling deployment...');
     const result = await api.cancelDeployment(bucketSlug, repositoryId, deploymentId);
-    
+
     if (result.success) {
       spinner.succeed('Deployment cancelled');
     } else {
@@ -344,7 +425,16 @@ export function createDeployCommands(program: Command): void {
     .description('Deploy a repository to Vercel')
     .option('--json', 'Output as JSON')
     .option('-w, --watch', 'Watch deployment progress')
+    .option('-b, --branch <branch>', 'Branch to deploy (for repos with existing Vercel project)')
     .action(deployRepository);
+
+  deployCmd
+    .command('redeploy <repositoryId>')
+    .description('Redeploy a repository with optional branch selection')
+    .option('--json', 'Output as JSON')
+    .option('-w, --watch', 'Watch deployment progress')
+    .option('-b, --branch <branch>', 'Branch to deploy from')
+    .action(redeployRepository);
 
   deployCmd
     .command('list <repositoryId>')
@@ -352,7 +442,7 @@ export function createDeployCommands(program: Command): void {
     .description('List deployments for a repository')
     .option('--json', 'Output as JSON')
     .option('-n, --limit <number>', 'Number of deployments to show', '10')
-    .action((repositoryId, options) => 
+    .action((repositoryId, options) =>
       listDeployments(repositoryId, { ...options, limit: parseInt(options.limit, 10) })
     );
 

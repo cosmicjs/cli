@@ -211,6 +211,9 @@ cosmic repos env delete <repoId> KEY           # Delete env var
 ```bash
 cosmic deploy start <repoId>                   # Deploy to Vercel
 cosmic deploy start <repoId> --watch           # Deploy and watch progress
+cosmic deploy start <repoId> --branch main     # Deploy from specific branch (repos with Vercel project)
+cosmic deploy redeploy <repoId>                # Redeploy with branch selection (interactive)
+cosmic deploy redeploy <repoId> --branch main  # Redeploy from specific branch
 cosmic deploy list <repoId>                    # List deployments
 cosmic deploy logs <deploymentId>              # Get logs
 cosmic deploy logs <deploymentId> --follow     # Stream logs

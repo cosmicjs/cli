@@ -789,11 +789,30 @@ Deploy a repository to Vercel.
 ```bash
 cosmic deploy start <repositoryId>
 cosmic deploy trigger <repositoryId>         # Alias
+cosmic deploy start <repositoryId> --branch main   # Deploy from specific branch (repos with existing Vercel project)
 ```
 
 **Options:**
 | Option | Description |
 |--------|-------------|
+| `-w, --watch` | Watch deployment progress until complete |
+| `-b, --branch <branch>` | Branch to deploy (for repos with existing Vercel project; uses redeploy API) |
+| `--json` | Output as JSON |
+
+### `cosmic deploy redeploy`
+
+Redeploy a repository with optional branch selection. Use when the repository already has a Vercel project and you want to trigger a new deployment from a specific branch.
+
+```bash
+cosmic deploy redeploy <repositoryId>              # Interactive branch selection
+cosmic deploy redeploy <repositoryId> -b main      # Redeploy from main branch
+cosmic deploy redeploy <repositoryId> --branch develop --watch
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-b, --branch <branch>` | Branch to deploy from (skips interactive selection) |
 | `-w, --watch` | Watch deployment progress until complete |
 | `--json` | Output as JSON |
 
@@ -1457,7 +1476,8 @@ cosmic agents pr <agentId>
 
 # 11. Merge and redeploy
 # After reviewing/merging the PR:
-cosmic deploy start <repoId> --watch
+cosmic deploy redeploy <repoId> --branch main --watch
+# Or: cosmic deploy start <repoId> --branch main --watch
 ```
 
 ### Automated Content Pipeline

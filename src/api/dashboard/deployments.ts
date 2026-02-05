@@ -63,26 +63,63 @@ export async function deployRepository(
   return response;
 }
 
+/** Backend response shape for repository deployments list */
+interface RepositoryDeploymentResponse {
+  id?: string;
+  deployment_id?: string;
+  deployment_url?: string;
+  deployment_status?: string;
+  name?: string;
+  created_at?: number;
+  commit_ref?: string;
+  commit_sha?: string;
+  commit_message?: string;
+  meta?: Record<string, unknown>;
+}
+
+/** Map backend deployment format to CLI Deployment interface */
+function mapDeployment(d: RepositoryDeploymentResponse): Deployment {
+  const state = (d.deployment_status || '').toUpperCase() as Deployment['state'];
+  return {
+    uid: d.deployment_id || d.id || '',
+    name: d.name || '',
+    url: d.deployment_url || '',
+    state: ['BUILDING', 'READY', 'ERROR', 'CANCELED', 'QUEUED'].includes(state)
+      ? state
+      : 'BUILDING',
+    created: d.created_at || 0,
+    meta: {
+      githubCommitRef: d.commit_ref,
+      githubCommitSha: d.commit_sha,
+      githubCommitMessage: d.commit_message,
+      ...d.meta,
+    },
+  };
+}
+
 export async function listDeployments(
   bucketSlug: string,
-  vercelProjectId: string,
-  options: { limit?: number; since?: number; until?: number } = {}
+  repositoryId: string,
+  options: { limit?: number; since?: number; until?: number; branch?: string } = {}
 ): Promise<{ deployments: Deployment[]; total?: number }> {
-  const params: Record<string, unknown> = {
-    vercel_project_id: vercelProjectId,
-  };
+  const params: Record<string, unknown> = {};
   if (options.limit) params.limit = options.limit;
   if (options.since) params.since = options.since;
   if (options.until) params.until = options.until;
+  if (options.branch) params.branch = options.branch;
 
-  const response = await get<{ deployments: Deployment[]; total?: number }>(
-    '/deployments',
-    { bucketSlug, params }
-  );
+  const response = await get<{
+    deployments: RepositoryDeploymentResponse[];
+    total?: number;
+  }>(`/repositories/${repositoryId}/deployments/list`, {
+    bucketSlug,
+    params,
+  });
 
+  const raw = response.deployments || [];
   return {
-    deployments: response.deployments || [],
-    total: response.total,
+    deployments: raw.map(mapDeployment),
+    total: response.total ?? raw.length,
   };
 }
 
@@ -128,6 +165,32 @@ export async function cancelDeployment(
     { bucketSlug }
   );
   return response;
+}
+
+export interface RedeployOptions {
+  branch?: string;
+  commitSha?: string;
+}
+
+export async function redeployProject(
+  projectId: string,
+  options: RedeployOptions = {}
+): Promise<{ success: boolean; deploymentUrl?: string; error?: string; message?: string }> {
+  const response = await post<{
+    success: boolean;
+    deploymentUrl?: string;
+    deployment_url?: string;
+    error?: string;
+    message?: string;
+  }>('/deployments/redeploy', {
+    projectId,
+    branch: options.branch,
+    commitSha: options.commitSha,
+  });
+  return {
+    ...response,
+    deploymentUrl: response.deploymentUrl ?? response.deployment_url,
+  };
 }
 
 export async function getLatestDeploymentStatus(
