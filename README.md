@@ -12,17 +12,6 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 # → Creates project, generates content model, builds Next.js app, deploys to Vercel
 ```
 
-## Why Cosmic CLI?
-
-| Traditional Workflow | Cosmic CLI |
-|---------------------|------------|
-| Design content schema | `cosmic projects create` with AI |
-| Build CMS admin | Already done |
-| Write frontend code | `cosmic build -p "describe your app"` |
-| Configure hosting | Automatic Vercel integration |
-| Set up CI/CD | `cosmic update` + auto-deploy on PR |
-| **Hours of work** | **Minutes** |
-
 ## Table of Contents
 
 - [Features](#features)
