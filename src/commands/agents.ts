@@ -10,6 +10,7 @@ import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
+import { markdownLinksToTerminal } from '../utils/envVars.js';
 import { captureAuthWithDoneButton, formatCookiesForApi, formatLocalStorageForApi } from '../auth/capture.js';
 
 /**
@@ -808,7 +809,7 @@ async function approveOperations(
     if (pendingOps.env_vars?.length > 0) {
       display.subheader(`Environment Variables (${pendingOps.env_vars.length})`);
       for (const [index, envVar] of pendingOps.env_vars.entries()) {
-        console.log(`  ${chalk.dim(`[${index}]`)} ${chalk.yellow(envVar.key)}: ${envVar.description}`);
+        console.log(`  ${chalk.dim(`[${index}]`)} ${chalk.yellow(envVar.key)}: ${markdownLinksToTerminal(envVar.description)}`);
       }
     }
 

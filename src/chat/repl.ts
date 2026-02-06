@@ -41,7 +41,7 @@ import {
   addRepositoryEnvVar,
   type DeploymentLog,
 } from '../api/dashboard.js';
-import { extractEnvVarsFromContent, extractEnvVarsFromCode } from '../utils/envVars.js';
+import { extractEnvVarsFromContent, extractEnvVarsFromCode, markdownLinksToTerminal } from '../utils/envVars.js';
 import type { EnvVarFromBackend, RepositoryPendingOperations } from '../api/dashboard/ai.js';
 import * as api from '../api/dashboard.js';
 import * as display from '../utils/display.js';
@@ -4516,7 +4516,8 @@ async function processMessage(
               // Display new env vars that need to be added
               newEnvVars.forEach((envVar, idx) => {
                 console.log(chalk.cyan(`  ${idx + 1}. ${envVar.key}`));
-                console.log(chalk.dim(`     ${envVar.description}`));
+                // Convert markdown links [text](url) to terminal-friendly format: text (url)
+                console.log(chalk.dim(`     ${markdownLinksToTerminal(envVar.description)}`));
                 if (envVar.detected_in) {
                   console.log(chalk.dim(`     Detected in: ${envVar.detected_in}`));
                 }
@@ -4561,7 +4562,16 @@ async function processMessage(
               } else {
                 console.log(chalk.yellow('  ⚠ Skipping environment variable configuration'));
                 if (envVarsArePending) {
-                  console.log(chalk.dim('  The commit will be skipped. Use "cosmic update" to try again later.'));
+                  // Ask if user wants to commit without env vars instead of blocking entirely
+                  console.log(chalk.dim('  The deployment may fail if these variables are required at build time.'));
+                  console.log();
+                  const commitAnywayInput = await sharedAskLine!(chalk.yellow('  Commit without env var updates? [Y/n]: '));
+                  if (commitAnywayInput.toLowerCase() !== 'n') {
+                    envVarsConfigured = true; // Allow commit to proceed
+                    console.log(chalk.dim('  Proceeding with commit without environment variables...'));
+                  } else {
+                    console.log(chalk.dim('  The commit will be skipped. Use "cosmic update" to try again later.'));
+                  }
                 } else {
                   console.log(chalk.dim('  The deployment may fail if these variables are required.'));
                 }
@@ -4751,7 +4761,8 @@ async function processMessage(
                 // Display new env vars
                 newEnvVars.forEach((envVar, idx) => {
                   console.log(chalk.cyan(`  ${idx + 1}. ${envVar.key}`));
-                  console.log(chalk.dim(`     ${envVar.description}`));
+                  // Convert markdown links [text](url) to terminal-friendly format: text (url)
+                  console.log(chalk.dim(`     ${markdownLinksToTerminal(envVar.description)}`));
                   // Show placeholder value (don't show actual sensitive values)
                   const displayValue = envVar.value.includes('your_') || envVar.value.includes('your-')
                     ? envVar.value

@@ -374,6 +374,9 @@ async function cd(path?: string): Promise<void> {
     return;
   }
 
+  // Normalize path: strip trailing slashes (e.g. "../" -> "..")
+  path = path.replace(/\/+$/, '') || path;
+
   // ".." - go up one level
   if (path === '..') {
     const currentObjectType = getCurrentObjectType();

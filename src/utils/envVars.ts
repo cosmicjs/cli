@@ -11,11 +11,58 @@ export interface EnvVar {
 }
 
 /**
+ * Extract env var descriptions from the AI's <!-- METADATA: {"type":"envVars"} --> JSON block.
+ * These descriptions include markdown links to service dashboards (e.g. [Stripe Dashboard](url)).
+ */
+function extractEnvVarDescriptionsFromAIResponse(content: string): Record<string, string> {
+  const descriptions: Record<string, string> = {};
+  if (!content) return descriptions;
+
+  try {
+    const metadataPattern = /<!--\s*METADATA:\s*\{"type":"envVars"\}\s*-->/i;
+    const metadataMatch = metadataPattern.exec(content);
+
+    if (metadataMatch) {
+      const afterMetadata = content.substring(metadataMatch.index + metadataMatch[0].length);
+      const codeBlockPattern = /```(?:json)?\s*\n?([\s\S]*?)```/;
+      const codeBlockMatch = codeBlockPattern.exec(afterMetadata);
+
+      if (codeBlockMatch) {
+        const jsonContent = codeBlockMatch[1].trim();
+        const parsedJson = JSON.parse(jsonContent);
+        const variables = parsedJson.variables || [];
+
+        for (const v of variables) {
+          if (v.key && v.description) {
+            descriptions[v.key] = v.description;
+          }
+        }
+      }
+    }
+  } catch {
+    // Silently fall through - will use hardcoded descriptions
+  }
+
+  return descriptions;
+}
+
+/**
+ * Convert markdown link syntax to terminal-friendly format.
+ * Converts [text](url) to "text (url)" so URLs are visible and clickable in terminals.
+ */
+export function markdownLinksToTerminal(text: string): string {
+  return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+}
+
+/**
  * Extract environment variables from streaming content in .env format
  * This handles streaming content that contains environment variables
  */
 export function extractEnvVarsFromContent(content: string): EnvVar[] {
   const envVars: EnvVar[] = [];
+
+  // Extract AI metadata descriptions (with markdown links) for priority use
+  const aiDescriptions = extractEnvVarDescriptionsFromAIResponse(content);
 
   // Cosmic environment variables that should be excluded (these are automatic)
   const cosmicEnvVars = [
@@ -61,8 +108,8 @@ export function extractEnvVarsFromContent(content: string): EnvVar[] {
           return;
         }
 
-        // Generate description based on common env var patterns
-        const description = generateEnvVarDescription(trimmedKey);
+        // Priority: AI metadata description (with links) > hardcoded description
+        const description = aiDescriptions[trimmedKey] || generateEnvVarDescription(trimmedKey);
 
         envVars.push({
           key: trimmedKey,
@@ -104,7 +151,8 @@ export function extractEnvVarsFromContent(content: string): EnvVar[] {
             continue;
           }
 
-          const description = generateEnvVarDescription(key);
+          // Priority: AI metadata description (with links) > hardcoded description
+          const description = aiDescriptions[key] || generateEnvVarDescription(key);
 
           envVars.push({
             key: key.trim(),
@@ -176,9 +224,14 @@ function generateEnvVarDescription(key: string): string {
 /**
  * Extract environment variables from code patterns like process.env.VAR_NAME
  * This is used to detect env vars from AI-generated code before deployment
+ * @param content - The full AI response text containing code
+ * @param aiResponseText - Optional separate AI response text to extract metadata descriptions from
  */
-export function extractEnvVarsFromCode(content: string): EnvVar[] {
+export function extractEnvVarsFromCode(content: string, aiResponseText?: string): EnvVar[] {
   const envVars = new Map<string, EnvVar>(); // Use Map to dedupe by key
+
+  // Extract AI metadata descriptions (with markdown links) for priority use
+  const aiDescriptions = extractEnvVarDescriptionsFromAIResponse(aiResponseText || content);
 
   // Cosmic env vars that are automatically provided - exclude these
   const cosmicEnvVars = [
@@ -221,10 +274,11 @@ export function extractEnvVarsFromCode(content: string): EnvVar[] {
       // Skip if already found
       if (envVars.has(envVarName)) continue;
 
+      // Priority: AI metadata description (with links) > hardcoded description
       envVars.set(envVarName, {
         key: envVarName,
         value: '', // User will need to provide the value
-        description: generateEnvVarDescription(envVarName),
+        description: aiDescriptions[envVarName] || generateEnvVarDescription(envVarName),
         required: true,
       });
     }
@@ -252,4 +306,4 @@ export function parseBackendEnvVars(envVarsData: BackendEnvVar[]): EnvVar[] {
   }));
 }
 
-export default { extractEnvVarsFromContent, extractEnvVarsFromCode, parseBackendEnvVars };
+export default { extractEnvVarsFromContent, extractEnvVarsFromCode, parseBackendEnvVars, markdownLinksToTerminal };
