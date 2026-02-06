@@ -253,10 +253,11 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
       return;
     }
 
-    console.log();
-    console.log(chalk.bold.cyan(`    Object Types in ${bucketSlug}`));
-    console.log(chalk.dim('    ' + '─'.repeat(60)));
-    console.log();
+    display.success(`Found ${objectTypes.length} object type${objectTypes.length !== 1 ? 's' : ''}`);
+
+    const table = display.createTable({
+      head: ['Title', 'Slug', 'Emoji', 'Objects'],
+    });
 
     for (const objType of objectTypes) {
       const slug = String(objType.slug || '-');
@@ -265,8 +266,17 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
       const emoji = (objType.emoji as string) || '📄';
       const countText = `${count} object${Number(count) !== 1 ? 's' : ''}`;
 
-      console.log(`    ${emoji}  ${chalk.cyan(slug.padEnd(22))}${title.padEnd(24)}${chalk.dim(countText)}`);
+      table.push([
+        chalk.cyan(title),
+        slug,
+        emoji,
+        countText,
+      ]);
     }
+
+    console.log(table.toString());
+    console.log();
+    console.log(chalk.dim(`  Use ${chalk.cyan('"cd <slug>"')} to enter an object type.`));
     console.log();
   } catch (error) {
     spinner.fail('Failed to load object types');
@@ -309,10 +319,11 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
       return;
     }
 
-    console.log();
-    console.log(chalk.bold.cyan(`    Objects (${typeSlug})`));
-    console.log(chalk.dim('    ' + '─'.repeat(60)));
-    console.log();
+    display.success(`Found ${result.total} object${result.total !== 1 ? 's' : ''} in ${chalk.bold(typeSlug)}`);
+
+    const table = display.createTable({
+      head: ['Title', 'Slug', 'ID', 'Status'],
+    });
 
     for (const obj of objects) {
       const objAny = obj as Record<string, unknown>;
@@ -320,18 +331,25 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
       const data = (objAny.object || objAny) as Record<string, unknown>;
 
       const title = String(data.title || '-');
-      const slug = String(data.slug || data.id || '-');
+      const slug = String(data.slug || '-');
+      const id = String(data.id || objAny.id || '-');
       const status = String(objAny.main_object_status || data.status || 'draft');
 
-      const icon = status === 'published' ? chalk.green('●') : chalk.yellow('○');
-      console.log(`    ${icon}  ${chalk.cyan(display.truncate(slug, 28).padEnd(28))} ${title}`);
+      const statusDisplay = status === 'published' ? chalk.green('● published') : chalk.yellow('○ ' + status);
+      table.push([
+        chalk.cyan(title),
+        slug,
+        chalk.dim(id),
+        statusDisplay,
+      ]);
     }
+
+    console.log(table.toString());
 
     if (result.total > objects.length) {
       console.log();
       console.log(chalk.dim(`    ... and ${result.total - objects.length} more`));
     }
-    console.log();
   } catch (error) {
     spinner.fail('Failed to load objects');
     const errorMessage = (error as Error).message;

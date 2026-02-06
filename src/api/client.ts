@@ -6,6 +6,7 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
 import { getApiUrl, getCurrentBucketSlug } from '../config/store.js';
 import { getAuthHeaders, getReadQueryParams } from '../auth/manager.js';
+import { CLI_VERSION } from '../version.js';
 import type { APIResponse } from '../types.js';
 
 // Create axios instance
@@ -38,7 +39,8 @@ function getClient(): AxiosInstance {
         'Content-Type': 'application/json',
         // Required: Dashboard API requires Origin header for CORS
         'Origin': 'https://app.cosmicjs.com',
-        'User-Agent': 'CosmicCLI/1.0.0',
+        'User-Agent': `CosmicCLI/${CLI_VERSION}`,
+        'X-Cosmic-Client': 'cli',
       },
     });
     currentBaseUrl = apiUrl;

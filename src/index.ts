@@ -41,8 +41,8 @@ import { startChat } from './chat/repl.js';
 import { isAuthenticated } from './config/store.js';
 import { formatContext, getContextInfo } from './config/context.js';
 import { getCurrentUser, getAuthType } from './auth/manager.js';
-
-const VERSION = '1.0.0';
+import { CLI_VERSION } from './version.js';
+import { checkClientVersion } from './api/versionCheck.js';
 
 // Create the main program
 const program = new Command();
@@ -50,7 +50,7 @@ const program = new Command();
 program
   .name('cosmic')
   .description('AI-powered CLI for Cosmic CMS')
-  .version(VERSION)
+  .version(CLI_VERSION)
   .option('-v, --verbose', 'Enable verbose output')
   .option('--no-color', 'Disable colored output');
 
@@ -279,7 +279,7 @@ program.action(async () => {
  */
 function printWelcome(): void {
   console.log();
-  console.log(chalk.bold.cyan('  Cosmic CLI') + chalk.dim(` v${VERSION}`));
+  console.log(chalk.bold.cyan('  Cosmic CLI') + chalk.dim(` v${CLI_VERSION}`));
   console.log();
 
   const authType = getAuthType();
@@ -306,6 +306,9 @@ program.exitOverride();
 
 async function main(): Promise<void> {
   try {
+    // Non-blocking version check - warns if CLI is outdated but never blocks
+    await checkClientVersion();
+
     await program.parseAsync(process.argv);
   } catch (error) {
     if ((error as Error).name === 'CommanderError') {
