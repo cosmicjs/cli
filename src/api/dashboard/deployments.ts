@@ -58,7 +58,7 @@ export async function deployRepository(
   const response = await post<{ success: boolean; deployment_url?: string; vercel_project_id?: string }>(
     `/repositories/${repositoryId}/deploy`,
     {},
-    { bucketSlug }
+    { bucketSlug, config: { timeout: 120000 } }
   );
   return response;
 }
@@ -186,6 +186,8 @@ export async function redeployProject(
     projectId,
     branch: options.branch,
     commitSha: options.commitSha,
+  }, {
+    config: { timeout: 120000 },
   });
   return {
     ...response,
@@ -251,7 +253,9 @@ export interface DeployAIAppResponse {
 
 export async function deployAIApp(data: DeployAIAppData): Promise<DeployAIAppResponse> {
   const message_id = data.message_id || crypto.randomUUID();
-  const response = await post<DeployAIAppResponse>('/ai/deploy', { ...data, message_id }, {});
+  const response = await post<DeployAIAppResponse>('/ai/deploy', { ...data, message_id }, {
+    config: { timeout: 120000 }, // 2 minutes — repo creation + Vercel deploy can take a while
+  });
   return response;
 }
 

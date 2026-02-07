@@ -34,7 +34,11 @@ export {
   type ListObjectsOptions,
   type CreateObjectData,
   type UpdateObjectData,
+  updateObjectType,
+  deleteObjectType,
+  duplicateObjectType,
   type CreateObjectTypeData,
+  type UpdateObjectTypeData,
 } from './objects.js';
 
 // Media
@@ -149,6 +153,56 @@ export {
   type DeployAIAppResponse,
   type RepoAvailabilityResponse,
 } from './deployments.js';
+
+// Domains
+export {
+  listDomains,
+  getDomain,
+  searchDomains,
+  checkAvailability,
+  getDomainPricing,
+  importDomain,
+  updateDomainSettings,
+  deleteDomain,
+  connectDomain,
+  disconnectDomain,
+  listDnsRecords,
+  createDnsRecord,
+  updateDnsRecord,
+  deleteDnsRecord,
+  type Domain,
+  type DnsRecord,
+  type DomainSuggestion,
+  type ImportDomainData,
+  type ConnectDomainData,
+  type UpdateDomainSettingsData,
+  type CreateDnsRecordData,
+  type UpdateDnsRecordData,
+} from './domains.js';
+
+// Team
+export {
+  listProjectTeam,
+  addProjectTeamMember,
+  updateProjectTeamMember,
+  removeProjectTeamMember,
+  searchProjectTeamMember,
+  type TeamMember,
+  type AddTeamMemberData,
+  type UpdateTeamMemberData,
+} from './team.js';
+
+// Webhooks
+export {
+  listWebhooks,
+  getWebhook,
+  createWebhook,
+  updateWebhook,
+  deleteWebhook,
+  type Webhook,
+  type CreateWebhookData,
+  type UpdateWebhookData,
+} from './webhooks.js';
 
 // AI
 export {

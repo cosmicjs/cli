@@ -112,6 +112,70 @@ export interface MetafieldOption {
   label?: string;
 }
 
+// Webhook types
+export interface Webhook {
+  id: string;
+  title: string;
+  endpoint: string;
+  resource: 'objects' | 'media' | 'merge_request';
+  events: string[];
+  payload?: boolean;
+  props?: string;
+  object_types?: string[];
+  headers?: { key: string; value: string }[];
+  created_at?: string;
+  modified_at?: string;
+}
+
+// Team types
+export interface TeamMember {
+  id: string;
+  user_id?: string;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  avatar_url?: string;
+  project_role: 'admin' | 'manager' | 'user';
+  bucket_roles?: {
+    bucket_id: string;
+    role: 'admin' | 'developer' | 'editor' | 'contributor';
+    publishing_restrictions?: 'draft_only';
+    additional_permissions?: string[];
+    object_types?: string[];
+  }[];
+  status?: string;
+  created_at?: string;
+}
+
+// Domain types
+export interface Domain {
+  id: string;
+  domain_name: string;
+  status?: string;
+  auto_renew?: boolean;
+  expires_at?: string;
+  created_at?: string;
+  updated_at?: string;
+  nameservers?: string[];
+  custom_nameservers?: string[];
+  cdn_enabled?: boolean;
+  description?: string;
+  repository_id?: string;
+  verified?: boolean;
+}
+
+export interface DnsRecord {
+  id: string;
+  type: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'SRV' | 'NS';
+  name: string;
+  value: string;
+  ttl?: number;
+  priority?: number;
+  comment?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // Media types
 export interface Media {
   id: string;

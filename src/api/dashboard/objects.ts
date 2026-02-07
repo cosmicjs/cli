@@ -3,7 +3,7 @@
  * Objects and Object Types
  */
 
-import { get, post, patch } from '../client.js';
+import { get, post, patch, del } from '../client.js';
 import { getSDKClient } from '../sdk.js';
 import { getBucket } from './core.js';
 import type { CosmicObject, ObjectType } from '../../types.js';
@@ -193,6 +193,64 @@ export async function createObjectType(
   const response = await post<{ object_type: ObjectType }>('/objectTypes/add', {
     slug: bucketSlug,
     data: objectType,
+  });
+  return response.object_type;
+}
+
+export interface UpdateObjectTypeData {
+  title?: string;
+  slug?: string;
+  singular?: string;
+  emoji?: string;
+  metafields?: Array<{
+    title?: string;
+    key: string;
+    type: string;
+    required?: boolean;
+    options?: unknown;
+  }>;
+  options?: {
+    slug_field?: boolean;
+    content_editor?: boolean;
+  };
+  singleton?: boolean;
+  localization?: boolean;
+  locales?: string[];
+  priority_locale?: string;
+  preview_link?: string;
+  folder?: string;
+}
+
+export async function updateObjectType(
+  bucketSlug: string,
+  typeSlug: string,
+  data: UpdateObjectTypeData
+): Promise<ObjectType> {
+  const response = await patch<{ object_type: ObjectType }>('/objectTypes/update', {
+    slug: bucketSlug,
+    type_slug: typeSlug,
+    data,
+  });
+  return response.object_type;
+}
+
+export async function deleteObjectType(
+  bucketSlug: string,
+  typeSlug: string
+): Promise<void> {
+  await del('/objectTypes/delete', {
+    bucketSlug,
+    params: { type_slug: typeSlug },
+  });
+}
+
+export async function duplicateObjectType(
+  bucketSlug: string,
+  typeSlug: string
+): Promise<ObjectType> {
+  const response = await post<{ object_type: ObjectType }>('/objectTypes/duplicate', {
+    slug: bucketSlug,
+    type_slug: typeSlug,
   });
   return response.object_type;
 }

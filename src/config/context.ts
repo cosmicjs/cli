@@ -12,6 +12,7 @@ import {
   getCurrentBucketSlug,
   getCurrentWorkspaceSlug,
   getCurrentProjectSlug,
+  getCurrentProjectId,
 } from './store.js';
 import type { CLIContext, CosmicConfig, CosmicCredentials } from '../types.js';
 
@@ -151,6 +152,19 @@ export function requireAuth(): void {
 }
 
 /**
+ * Check if we have project context and throw if not
+ */
+export function requireProject(): string {
+  const projectId = getCurrentProjectId();
+  if (!projectId) {
+    throw new Error(
+      'No project selected. Run `cosmic use` to set your workspace, then `cosmic cd` to navigate to a project.'
+    );
+  }
+  return projectId;
+}
+
+/**
  * Check if we have bucket context and throw if not
  */
 export function requireBucket(): string {
@@ -171,5 +185,6 @@ export default {
   getContextInfo,
   requireContext,
   requireAuth,
+  requireProject,
   requireBucket,
 };

@@ -36,6 +36,10 @@ import { createAgentsCommands } from './commands/agents.js';
 import { createReposCommands } from './commands/repos.js';
 import { createDeployCommands } from './commands/deploy.js';
 import { createAICommands } from './commands/ai.js';
+import { createTypesCommands } from './commands/types.js';
+import { createWebhooksCommands } from './commands/webhooks.js';
+import { createTeamCommands } from './commands/team.js';
+import { createDomainsCommands } from './commands/domains.js';
 import { createShellCommand } from './commands/shell.js';
 import { startChat } from './chat/repl.js';
 import { isAuthenticated } from './config/store.js';
@@ -65,6 +69,10 @@ createAgentsCommands(program);
 createReposCommands(program);
 createDeployCommands(program);
 createAICommands(program);
+createTypesCommands(program);
+createWebhooksCommands(program);
+createTeamCommands(program);
+createDomainsCommands(program);
 createShellCommand(program);
 
 // Add chat command (interactive mode)
@@ -265,6 +273,10 @@ program.action(async () => {
     console.log(`  ${chalk.cyan('cosmic cd')}         Navigate to project/bucket`);
     console.log(`  ${chalk.cyan('cosmic ls')}         List objects in current bucket`);
     console.log(`  ${chalk.cyan('cosmic media')}      Media file operations`);
+    console.log(`  ${chalk.cyan('cosmic types')}      Object type management`);
+    console.log(`  ${chalk.cyan('cosmic webhooks')}   Webhook management`);
+    console.log(`  ${chalk.cyan('cosmic team')}       Team member management`);
+    console.log(`  ${chalk.cyan('cosmic domains')}    Domain & DNS management`);
     console.log(`  ${chalk.cyan('cosmic workflows')}  Workflow operations`);
     console.log(`  ${chalk.cyan('cosmic agents')}     AI agent operations`);
     console.log(`  ${chalk.cyan('cosmic repos')}      Repository management`);
