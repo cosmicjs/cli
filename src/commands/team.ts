@@ -88,9 +88,9 @@ async function addTeamMember(
     (await prompts.select({
       message: 'Project role:',
       choices: [
-        { title: 'Admin - Full access', value: 'admin' },
-        { title: 'Manager - Manage content and settings', value: 'manager' },
-        { title: 'User - Content access based on bucket roles', value: 'user' },
+        { name: 'admin' as const, message: 'Admin - Full access' },
+        { name: 'manager' as const, message: 'Manager - Manage content and settings' },
+        { name: 'user' as const, message: 'User - Content access based on bucket roles' },
       ],
     }))) as 'admin' | 'manager' | 'user';
 
@@ -121,9 +121,9 @@ async function updateTeamMemberCmd(
     (await prompts.select({
       message: 'New project role:',
       choices: [
-        { title: 'Admin - Full access', value: 'admin' },
-        { title: 'Manager - Manage content and settings', value: 'manager' },
-        { title: 'User - Content access based on bucket roles', value: 'user' },
+        { name: 'admin' as const, message: 'Admin - Full access' },
+        { name: 'manager' as const, message: 'Manager - Manage content and settings' },
+        { name: 'user' as const, message: 'User - Content access based on bucket roles' },
       ],
     }))) as 'admin' | 'manager' | 'user';
 

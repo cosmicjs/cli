@@ -135,9 +135,9 @@ async function createWebhook(options: {
     (await prompts.select({
       message: 'Resource:',
       choices: [
-        { title: 'Objects', value: 'objects' },
-        { title: 'Media', value: 'media' },
-        { title: 'Merge Request', value: 'merge_request' },
+        { name: 'objects' as const, message: 'Objects' },
+        { name: 'media' as const, message: 'Media' },
+        { name: 'merge_request' as const, message: 'Merge Request' },
       ],
     }))) as 'objects' | 'media' | 'merge_request';
 
@@ -148,10 +148,10 @@ async function createWebhook(options: {
     events = await prompts.multiselect({
       message: 'Events:',
       choices: [
-        { title: 'Created', value: 'created' },
-        { title: 'Edited', value: 'edited' },
-        { title: 'Deleted', value: 'deleted' },
-        { title: 'Completed', value: 'completed' },
+        { name: 'created' as const, message: 'Created' },
+        { name: 'edited' as const, message: 'Edited' },
+        { name: 'deleted' as const, message: 'Deleted' },
+        { name: 'completed' as const, message: 'Completed' },
       ],
     });
   }

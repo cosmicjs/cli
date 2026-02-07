@@ -346,13 +346,13 @@ async function addDnsRecordCmd(
     (await prompts.select({
       message: 'Record type:',
       choices: [
-        { title: 'A', value: 'A' },
-        { title: 'AAAA', value: 'AAAA' },
-        { title: 'CNAME', value: 'CNAME' },
-        { title: 'MX', value: 'MX' },
-        { title: 'TXT', value: 'TXT' },
-        { title: 'SRV', value: 'SRV' },
-        { title: 'NS', value: 'NS' },
+        { name: 'A' as const, message: 'A' },
+        { name: 'AAAA' as const, message: 'AAAA' },
+        { name: 'CNAME' as const, message: 'CNAME' },
+        { name: 'MX' as const, message: 'MX' },
+        { name: 'TXT' as const, message: 'TXT' },
+        { name: 'SRV' as const, message: 'SRV' },
+        { name: 'NS' as const, message: 'NS' },
       ],
     }))) as 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'SRV' | 'NS';
 
