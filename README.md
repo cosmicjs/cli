@@ -20,6 +20,18 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 - [Authentication](#authentication)
 - [Interactive Shell](#interactive-shell)
 - [Core Commands](#core-commands)
+  - [Context & Navigation](#context--navigation)
+  - [Objects](#objects)
+  - [Types](#types)
+  - [Media](#media)
+  - [Repositories](#repositories)
+  - [Deployments](#deployments)
+  - [Webhooks](#webhooks)
+  - [Team](#team)
+  - [Domains](#domains)
+  - [Workflows](#workflows)
+  - [Agents](#agents)
+  - [AI Generation](#ai-generation)
 - [Shortcut Commands](#shortcut-commands)
 - [Interactive Chat Mode](#interactive-chat-mode)
 - [Configuration](#configuration)
@@ -32,7 +44,10 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 - **Interactive Shell** - Run commands without the `cosmic` prefix
 - **AI-Powered Chat Mode** - Interact with your content using natural language
 - **Shortcut Commands** - `content`, `build`, and `update` for common AI workflows
-- **Direct Commands** - Full CRUD for objects, media, repos, workflows, and agents
+- **Direct Commands** - Full CRUD for objects, media, types, repos, workflows, and agents
+- **Team Management** - Add, update, and remove project team members
+- **Webhooks** - Create and manage webhooks for content events
+- **Domains & DNS** - Import domains, manage DNS records, connect to deployments
 - **Repository & Deploy** - Connect GitHub repos and deploy to Vercel
 - **Multiple Auth Methods** - User login (JWT) or bucket keys
 - **Context Management** - Navigate workspaces, projects, and buckets like a filesystem
@@ -155,6 +170,17 @@ cosmic objects publish <id>                  # Publish object
 cosmic objects types                         # List object types
 ```
 
+### Types
+
+```bash
+cosmic types list                           # List object types
+cosmic types get <slug>                     # Get type details & metafields
+cosmic types create --title "Posts"         # Create object type (interactive)
+cosmic types update <slug> --emoji "📝"     # Update object type
+cosmic types delete <slug>                  # Delete type (and all its objects)
+cosmic types duplicate <slug>              # Duplicate a type
+```
+
 ### Media
 
 ```bash
@@ -214,6 +240,48 @@ cosmic deploy list <repoId>                    # List deployments
 cosmic deploy logs <deploymentId>              # Get logs
 cosmic deploy logs <deploymentId> --follow     # Stream logs
 cosmic deploy cancel <repoId> <deploymentId>   # Cancel deployment
+```
+
+### Webhooks
+
+```bash
+cosmic webhooks list                                        # List webhooks
+cosmic webhooks get <id>                                    # Get webhook details
+cosmic webhooks create                                      # Create webhook (interactive)
+cosmic webhooks create --title "Notify" \
+  --endpoint https://example.com/hook \
+  --resource objects --events created,edited               # Create with options
+cosmic webhooks update <id> --endpoint https://new.url     # Update webhook
+cosmic webhooks delete <id>                                # Delete webhook
+```
+
+### Team
+
+```bash
+cosmic team list                              # List project team members
+cosmic team add user@example.com              # Add team member (interactive role)
+cosmic team add user@example.com --role admin # Add with specific role
+cosmic team update <userId> --role manager    # Change member role
+cosmic team remove <userId>                   # Remove team member
+```
+
+### Domains
+
+```bash
+cosmic domains list                                  # List all domains
+cosmic domains get <id>                              # Get domain details
+cosmic domains search example.com                    # Search available domains
+cosmic domains import example.com                    # Import external domain
+cosmic domains connect <id> --repo <repoId>          # Connect domain to repo
+cosmic domains disconnect <id> --repo <repoId>       # Disconnect from repo
+cosmic domains delete <id>                           # Delete domain
+
+# DNS record management
+cosmic domains dns list <domainId>                   # List DNS records
+cosmic domains dns add <domainId>                    # Add record (interactive)
+cosmic domains dns add <domainId> -t A -n @ -v 1.2.3.4  # Add with options
+cosmic domains dns update <domainId> <recordId>      # Update record
+cosmic domains dns delete <domainId> <recordId>      # Delete record
 ```
 
 ### Workflows

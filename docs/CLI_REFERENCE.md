@@ -9,9 +9,13 @@ Complete command reference for the Cosmic CLI. For a quick overview, see the [RE
 - [Authentication](#authentication)
 - [Context & Navigation](#context--navigation)
 - [Objects](#objects)
+- [Types](#types)
 - [Media](#media)
 - [Repositories](#repositories)
 - [Deployments](#deployments)
+- [Webhooks](#webhooks)
+- [Team](#team)
+- [Domains](#domains)
 - [Workflows](#workflows)
 - [Agents](#agents)
 - [AI Generation](#ai-generation)
@@ -106,9 +110,13 @@ ai image <prompt>     # Generate image
 #### Other Commands (in shell)
 
 ```bash
+types list            # List object types
 agents list           # List agents
 workflows list        # List workflows
 repos list            # List repositories
+webhooks list         # List webhooks
+team list             # List team members
+domains list          # List domains
 ```
 
 ---
@@ -364,6 +372,111 @@ List object types in current bucket.
 cosmic objects types
 cosmic objects types --json
 ```
+
+---
+
+## Types
+
+### `cosmic types list`
+
+List object types in current bucket.
+
+```bash
+cosmic types list
+cosmic types ls                             # Alias
+cosmic types list --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic types get`
+
+Get object type details including metafields.
+
+```bash
+cosmic types get <slug>
+cosmic types get posts --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic types create`
+
+Create a new object type.
+
+```bash
+cosmic types create
+cosmic types create --title "Blog Posts"
+cosmic types create --title "Posts" --slug posts --emoji "📝"
+cosmic types add                             # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | Object type title |
+| `--slug <slug>` | Object type slug (auto-generated from title) |
+| `--singular <name>` | Singular display name |
+| `--emoji <emoji>` | Emoji icon |
+| `--singleton` | Create as singleton type |
+| `--json` | Output as JSON |
+
+### `cosmic types update`
+
+Update an object type.
+
+```bash
+cosmic types update <slug> --title "New Title"
+cosmic types update posts --emoji "✍️"
+cosmic types edit posts --singular "Post"    # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | New title |
+| `--slug <slug>` | New slug |
+| `--singular <name>` | New singular name |
+| `--emoji <emoji>` | New emoji |
+| `--singleton` | Set as singleton |
+| `--no-singleton` | Unset singleton |
+| `--json` | Output as JSON |
+
+### `cosmic types delete`
+
+Delete an object type and all its objects.
+
+```bash
+cosmic types delete <slug>
+cosmic types rm <slug>                       # Alias
+cosmic types delete <slug> --force           # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+### `cosmic types duplicate`
+
+Duplicate an object type (copies structure, not objects).
+
+```bash
+cosmic types duplicate <slug>
+cosmic types dup <slug>                      # Alias
+cosmic types duplicate posts --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
 
 ---
 
@@ -927,6 +1040,364 @@ cosmic deploy cancel <repoId> <deploymentId> --force  # Skip confirmation
 
 ---
 
+## Webhooks
+
+### `cosmic webhooks list`
+
+List webhooks in current bucket.
+
+```bash
+cosmic webhooks list
+cosmic webhooks ls                           # Alias
+cosmic wh list                               # Short alias
+cosmic webhooks list --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic webhooks get`
+
+Get webhook details.
+
+```bash
+cosmic webhooks get <id>
+cosmic webhooks get <id> --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic webhooks create`
+
+Create a new webhook.
+
+```bash
+cosmic webhooks create                       # Interactive mode
+cosmic webhooks add                          # Alias
+cosmic webhooks create \
+  --title "Notify on publish" \
+  --endpoint https://example.com/webhook \
+  --resource objects \
+  --events created,edited,deleted
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | Webhook title |
+| `--endpoint <url>` | Endpoint URL to receive events |
+| `--resource <type>` | Resource type: `objects`, `media`, `merge_request` |
+| `--events <events>` | Events to listen for (comma-separated: `created`, `edited`, `deleted`, `completed`) |
+| `--object-types <types>` | Object type filters (comma-separated) |
+| `--payload` | Include full payload in webhook |
+| `--props <props>` | Properties to include in payload |
+| `--json` | Output as JSON |
+
+### `cosmic webhooks update`
+
+Update a webhook.
+
+```bash
+cosmic webhooks update <id> --endpoint https://new-url.com/hook
+cosmic webhooks edit <id> --events created,edited    # Alias
+cosmic webhooks update <id> --title "New Name" --no-payload
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | New title |
+| `--endpoint <url>` | New endpoint URL |
+| `--resource <type>` | New resource type |
+| `--events <events>` | New events (comma-separated) |
+| `--object-types <types>` | New object type filters (comma-separated) |
+| `--payload` | Enable payload |
+| `--no-payload` | Disable payload |
+| `--props <props>` | Properties to include in payload |
+| `--json` | Output as JSON |
+
+### `cosmic webhooks delete`
+
+Delete a webhook.
+
+```bash
+cosmic webhooks delete <id>
+cosmic webhooks rm <id>                      # Alias
+cosmic webhooks delete <id> --force          # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+---
+
+## Team
+
+Manage project team members. Requires a project to be selected (use `cosmic cd` to navigate to a project).
+
+### `cosmic team list`
+
+List team members in the current project.
+
+```bash
+cosmic team list
+cosmic team ls                               # Alias
+cosmic team list --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic team add`
+
+Add a team member to the project.
+
+```bash
+cosmic team add user@example.com             # Interactive role selection
+cosmic team add user@example.com --role admin
+cosmic team add user@example.com -r manager
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-r, --role <role>` | Project role: `admin`, `manager`, `user` |
+| `--json` | Output as JSON |
+
+**Roles:**
+| Role | Description |
+|------|-------------|
+| `admin` | Full access to the project |
+| `manager` | Manage content and settings |
+| `user` | Content access based on bucket roles |
+
+### `cosmic team update`
+
+Update a team member's role.
+
+```bash
+cosmic team update <userId> --role admin
+cosmic team edit <userId> -r user            # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-r, --role <role>` | New project role: `admin`, `manager`, `user` |
+| `--json` | Output as JSON |
+
+### `cosmic team remove`
+
+Remove a team member from the project.
+
+```bash
+cosmic team remove <userId>
+cosmic team rm <userId>                      # Alias
+cosmic team remove <userId> --force          # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+---
+
+## Domains
+
+Manage domains and DNS records.
+
+### `cosmic domains list`
+
+List all domains.
+
+```bash
+cosmic domains list
+cosmic domains ls                            # Alias
+cosmic domains list --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic domains get`
+
+Get domain details.
+
+```bash
+cosmic domains get <id>
+cosmic domains get <id> --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic domains search`
+
+Search for available domain names.
+
+```bash
+cosmic domains search example.com
+cosmic domains search mysite --limit 20
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-l, --limit <n>` | Limit results |
+| `--json` | Output as JSON |
+
+### `cosmic domains import`
+
+Import an external domain (one you already own).
+
+```bash
+cosmic domains import example.com
+cosmic domains import example.com --description "Main website"
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-d, --description <text>` | Domain description |
+| `--json` | Output as JSON |
+
+### `cosmic domains connect`
+
+Connect a domain to a deployed repository.
+
+```bash
+cosmic domains connect <id> --repo <repoId>
+cosmic domains connect <id> --repo <repoId> --redirect https://www.example.com
+cosmic domains connect <id> -r <repoId> --redirect-code 302
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-r, --repo <repoId>` | Repository ID to connect |
+| `--redirect <url>` | Redirect URL |
+| `--redirect-code <code>` | Redirect status code: `301`, `302`, `307`, `308` |
+| `--json` | Output as JSON |
+
+### `cosmic domains disconnect`
+
+Disconnect a domain from a repository.
+
+```bash
+cosmic domains disconnect <id> --repo <repoId>
+cosmic domains disconnect <id> -r <repoId>
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-r, --repo <repoId>` | Repository ID to disconnect |
+
+### `cosmic domains delete`
+
+Delete a domain.
+
+```bash
+cosmic domains delete <id>
+cosmic domains rm <id>                       # Alias
+cosmic domains delete <id> --force           # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+### DNS Records
+
+Manage DNS records for a domain.
+
+#### `cosmic domains dns list`
+
+List DNS records for a domain.
+
+```bash
+cosmic domains dns list <domainId>
+cosmic domains dns ls <domainId>             # Alias
+cosmic domains dns list <domainId> --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+#### `cosmic domains dns add`
+
+Add a DNS record.
+
+```bash
+cosmic domains dns add <domainId>                                   # Interactive
+cosmic domains dns add <domainId> -t A -n @ -v 76.76.21.21
+cosmic domains dns add <domainId> -t CNAME -n www -v example.com
+cosmic domains dns add <domainId> -t TXT -n @ -v "v=spf1 ..." --ttl 3600
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-t, --type <type>` | Record type: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `SRV`, `NS` |
+| `-n, --name <name>` | Record name |
+| `-v, --value <value>` | Record value |
+| `--ttl <seconds>` | TTL in seconds (60-86400) |
+| `--comment <text>` | Record comment |
+| `--json` | Output as JSON |
+
+#### `cosmic domains dns update`
+
+Update a DNS record.
+
+```bash
+cosmic domains dns update <domainId> <recordId> --value 1.2.3.4
+cosmic domains dns edit <domainId> <recordId> --ttl 3600    # Alias
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-t, --type <type>` | New record type |
+| `-n, --name <name>` | New record name |
+| `-v, --value <value>` | New record value |
+| `--ttl <seconds>` | New TTL |
+| `--comment <text>` | New comment |
+| `--json` | Output as JSON |
+
+#### `cosmic domains dns delete`
+
+Delete a DNS record.
+
+```bash
+cosmic domains dns delete <domainId> <recordId>
+cosmic domains dns rm <domainId> <recordId>            # Alias
+cosmic domains dns delete <domainId> <recordId> -f     # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+---
+
 ## Workflows
 
 ### `cosmic workflows list`
@@ -1451,8 +1922,12 @@ Many commands have short aliases for convenience:
 | `list` | `ls` |
 | `delete` | `rm` |
 | `create` | `add` |
+| `update` | `edit` |
+| `objects` | `obj` |
+| `webhooks` | `wh` |
 | `workflows` | `wf` |
 | `repositories` | `repos` |
+| `duplicate` | `dup` |
 | `executions` | `exec` |
 | `generate` | `gen` |
 | `image` | `img` |
