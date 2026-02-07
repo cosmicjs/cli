@@ -83,15 +83,16 @@ async function listObjects(options: {
     }
 
     const table = display.createTable({
-      head: ['ID', 'Title', 'Type', 'Status', 'Modified'],
+      head: ['Title', 'ID', 'Status', 'Type', 'Modified'],
+      colWidths: [40, 28, 16, 16, 14],
     });
 
     for (const obj of objects) {
       table.push([
+        chalk.cyan(display.truncate(obj.title, 36)),
         chalk.dim(obj.id),
-        display.truncate(obj.title, 40),
-        chalk.cyan(obj.type),
         display.formatStatus(obj.status),
+        obj.type,
         display.formatDate(obj.modified_at || obj.created_at),
       ]);
     }

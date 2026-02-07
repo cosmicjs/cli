@@ -86,18 +86,18 @@ export function formatStatus(status: string): string {
     case 'published':
     case 'active':
     case 'completed':
-      return chalk.green(status);
+      return chalk.green('● ' + status);
     case 'draft':
     case 'pending':
-      return chalk.yellow(status);
+      return chalk.yellow('○ ' + status);
     case 'failed':
     case 'cancelled':
     case 'paused':
-      return chalk.red(status);
+      return chalk.red('● ' + status);
     case 'running':
-      return chalk.blue(status);
+      return chalk.blue('● ' + status);
     default:
-      return chalk.dim(status);
+      return chalk.dim('○ ' + status);
   }
 }
 

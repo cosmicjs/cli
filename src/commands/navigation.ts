@@ -322,7 +322,8 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
     display.success(`Found ${result.total} object${result.total !== 1 ? 's' : ''} in ${chalk.bold(typeSlug)}`);
 
     const table = display.createTable({
-      head: ['Title', 'Slug', 'ID', 'Status'],
+      head: ['Title', 'ID', 'Status', 'Modified'],
+      colWidths: [40, 28, 16, 14],
     });
 
     for (const obj of objects) {
@@ -331,16 +332,15 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
       const data = (objAny.object || objAny) as Record<string, unknown>;
 
       const title = String(data.title || '-');
-      const slug = String(data.slug || '-');
       const id = String(data.id || objAny.id || '-');
       const status = String(objAny.main_object_status || data.status || 'draft');
+      const modified = String(data.modified_at || data.created_at || '');
 
-      const statusDisplay = status === 'published' ? chalk.green('● published') : chalk.yellow('○ ' + status);
       table.push([
-        chalk.cyan(title),
-        slug,
+        chalk.cyan(display.truncate(title, 36)),
         chalk.dim(id),
-        statusDisplay,
+        display.formatStatus(status),
+        display.formatDate(modified),
       ]);
     }
 
