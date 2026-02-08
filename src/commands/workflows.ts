@@ -50,9 +50,10 @@ async function listWorkflows(options: {
     });
 
     for (const workflow of workflowList) {
+      const workflowEmoji = workflow.emoji ? `${workflow.emoji} ` : '';
       table.push([
         chalk.dim(workflow.id || '-'),
-        display.truncate(workflow.workflow_name || 'Untitled', 35),
+        `${workflowEmoji}${display.truncate(workflow.workflow_name || 'Untitled', 35)}`,
         display.formatStatus(workflow.status || 'draft'),
         workflow.schedule_type || 'manual',
         String(workflow.steps?.length || 0),
@@ -86,8 +87,12 @@ async function getWorkflow(
       return;
     }
 
-    display.header(workflow.workflow_name);
+    const headerEmoji = workflow.emoji ? `${workflow.emoji} ` : '';
+    display.header(`${headerEmoji}${workflow.workflow_name}`);
     display.keyValue('ID', workflow.id);
+    if (workflow.emoji) {
+      display.keyValue('Emoji', workflow.emoji);
+    }
     display.keyValue('Status', display.formatStatus(workflow.status));
     display.keyValue('Schedule', workflow.schedule_type);
     if (workflow.description) {
@@ -339,6 +344,7 @@ async function cancelExecution(executionId: string): Promise<void> {
 async function createWorkflow(options: {
   name?: string;
   description?: string;
+  emoji?: string;
   agent?: string;
   scheduleType?: string;
   status?: string;
@@ -401,6 +407,7 @@ async function createWorkflow(options: {
     const data: api.CreateWorkflowData = {
       workflow_name: name,
       description: description || undefined,
+      emoji: options.emoji || undefined,
       steps: [initialStep],
       schedule_type: (options.scheduleType as 'manual' | 'cron' | 'event_triggered') || 'manual',
       status: (options.status as 'active' | 'draft' | 'paused') || 'draft',
@@ -414,8 +421,10 @@ async function createWorkflow(options: {
     const workflowId = workflowData.id || workflowData._id || '';
     const workflowStatus = (workflowData.status as string) || 'draft';
     const workflowSchedule = (workflowData.schedule_type as string) || 'manual';
+    const workflowEmoji = (workflowData.emoji as string) || options.emoji || '';
 
-    spinner.succeed(`Created workflow: ${chalk.cyan(workflowName)}`);
+    const emojiPrefix = workflowEmoji ? `${workflowEmoji} ` : '';
+    spinner.succeed(`Created workflow: ${emojiPrefix}${chalk.cyan(workflowName)}`);
 
     if (options.json) {
       display.json(workflow);
@@ -734,6 +743,7 @@ export function createWorkflowsCommands(program: Command): void {
     .description('Create a new workflow (requires at least one agent as initial step)')
     .option('-n, --name <name>', 'Workflow name')
     .option('-d, --description <description>', 'Workflow description')
+    .option('-e, --emoji <emoji>', 'Workflow emoji (e.g., ⚡, 📧, 🔄)')
     .option('-a, --agent <agentId>', 'Initial agent ID for the first step')
     .option('--schedule-type <type>', 'Schedule type (manual, cron, event_triggered)', 'manual')
     .option('--status <status>', 'Initial status (draft, active, paused)', 'draft')

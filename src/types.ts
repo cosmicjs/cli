@@ -206,6 +206,7 @@ export interface Workflow {
   id: string;
   workflow_name: string;
   description?: string;
+  emoji?: string;
   status: 'active' | 'draft' | 'paused';
   schedule_type: 'manual' | 'cron' | 'event_triggered';
   schedule_config?: ScheduleConfig;

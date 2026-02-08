@@ -71,6 +71,7 @@ export async function getWorkflow(
 export interface CreateWorkflowData {
   workflow_name: string;
   description?: string;
+  emoji?: string;
   steps: Workflow['steps'];
   shared_context?: Record<string, unknown>;
   user_inputs?: Workflow['user_inputs'];

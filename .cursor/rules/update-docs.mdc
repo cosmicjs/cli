@@ -1,0 +1,25 @@
+---
+description: Always update documentation when CLI commands or features change
+globs: src/commands/**/*.ts, src/chat/repl.ts, src/api/**/*.ts, src/types.ts
+alwaysApply: false
+---
+
+# Update Documentation on CLI Changes
+
+When any CLI commands, options, features, or types are added or modified, always update the following documentation files:
+
+1. **README** — `cosmic-cli/README.md`
+2. **CLI reference docs** — `cosmic-website/pages/docs/cli.mdx`
+
+## What to update
+
+- New commands or subcommands: add usage examples and descriptions
+- New options/flags: document in the relevant command section
+- Changed behavior: update descriptions and examples to reflect the new behavior
+- New types or interfaces: ensure any user-facing changes are reflected in docs
+
+## Checklist
+
+- [ ] `README.md` updated with new/changed commands and options
+- [ ] `cosmic-website/pages/docs/cli.mdx` updated with new/changed commands and options
+- [ ] Examples in docs match the current implementation
