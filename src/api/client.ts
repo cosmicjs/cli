@@ -240,7 +240,7 @@ export async function del<T = unknown>(
 
   const response = await getClient().delete<T>(endpoint, {
     params: options.params,
-    data: options.data,
+    data: options.data ?? {},
   });
 
   return response.data;

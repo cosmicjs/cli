@@ -11,6 +11,8 @@ Complete command reference for the Cosmic CLI. For a quick overview, see the [RE
 - [Objects](#objects)
 - [Types](#types)
 - [Media](#media)
+- [Media Folders](#media-folders)
+- [Billing](#billing)
 - [Repositories](#repositories)
 - [Deployments](#deployments)
 - [Webhooks](#webhooks)
@@ -111,6 +113,9 @@ ai image <prompt>     # Generate image
 
 ```bash
 types list            # List object types
+media folders list    # List media folders
+billing usage         # Show project usage
+billing plans list    # List available plans
 agents list           # List agents
 workflows list        # List workflows
 repos list            # List repositories
@@ -533,6 +538,248 @@ cosmic media delete <id>
 cosmic media rm <id>                         # Alias
 cosmic media delete <id> --force             # Skip confirmation
 ```
+
+### `cosmic media move`
+
+Move media files into a folder.
+
+```bash
+cosmic media move <ids...> --folder <folderSlug>
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --folder <folder>` | **Required.** Target folder slug |
+
+**Examples:**
+```bash
+cosmic media move abc123 --folder photos
+cosmic media move abc123 def456 --folder documents
+```
+
+### `cosmic media unfolder`
+
+Remove media files from their folder (unfile them).
+
+```bash
+cosmic media unfolder <ids...>
+```
+
+**Examples:**
+```bash
+cosmic media unfolder abc123
+cosmic media unfolder abc123 def456
+```
+
+---
+
+## Media Folders
+
+Manage media folders within a bucket. Folders are nested under the `media` command.
+
+### `cosmic media folders list`
+
+List all media folders in the current bucket.
+
+```bash
+cosmic media folders list
+cosmic media folders ls                      # Alias
+cosmic media folders list --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic media folders create`
+
+Create a new media folder.
+
+```bash
+cosmic media folders create
+cosmic media folders add                     # Alias
+cosmic media folders create --title "Photos"
+cosmic media folders create --title "Photos" --slug photos --emoji "📸"
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | Folder title (prompted if not provided) |
+| `--slug <slug>` | Folder slug (auto-generated from title) |
+| `--emoji <emoji>` | Folder emoji icon |
+| `--json` | Output as JSON |
+
+### `cosmic media folders update`
+
+Update a media folder.
+
+```bash
+cosmic media folders update <slug> --title "New Name"
+cosmic media folders edit <slug> --emoji "🖼️"    # Alias
+cosmic media folders update photos --slug images
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--title <title>` | New title |
+| `--slug <slug>` | New slug |
+| `--emoji <emoji>` | New emoji |
+| `--json` | Output as JSON |
+
+### `cosmic media folders delete`
+
+Delete a media folder. Media files in the folder will be unfiled but not deleted.
+
+```bash
+cosmic media folders delete <slug>
+cosmic media folders rm <slug>               # Alias
+cosmic media folders delete <slug> --force   # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+---
+
+## Billing
+
+Manage project billing, plans, addons, and usage. Requires a project to be selected (use `cosmic cd` to navigate to a project).
+
+### `cosmic billing usage`
+
+Show project usage statistics (API requests, storage, AI tokens, users, buckets).
+
+```bash
+cosmic billing usage
+cosmic billing usage --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### `cosmic billing portal`
+
+Open the Stripe billing portal in your browser to manage payment methods, view invoices, and more.
+
+```bash
+cosmic billing portal
+```
+
+### Plans
+
+#### `cosmic billing plans list`
+
+List available plans with pricing.
+
+```bash
+cosmic billing plans list
+cosmic billing plans ls                      # Alias
+cosmic billing plans list --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+#### `cosmic billing plans subscribe`
+
+Subscribe to a plan. Shows an interactive plan picker if no price ID is provided. Requires confirmation before proceeding.
+
+```bash
+cosmic billing plans subscribe
+cosmic billing plans upgrade                 # Alias
+cosmic billing plans subscribe --price-id price_123abc
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--price-id <priceId>` | Stripe price ID (skips interactive selection) |
+| `--json` | Output as JSON |
+
+#### `cosmic billing plans cancel`
+
+Cancel the current plan subscription.
+
+```bash
+cosmic billing plans cancel
+cosmic billing plans cancel --force          # Skip confirmation
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+### Addons
+
+#### `cosmic billing addons list`
+
+List available addons with pricing and subscription status. Shows actual quantities for per-unit addons (users, buckets, AI tokens).
+
+```bash
+cosmic billing addons list
+cosmic billing addons ls                     # Alias
+cosmic billing addons list --json
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+#### `cosmic billing addons subscribe`
+
+Subscribe to an addon. Shows an interactive picker with current subscription status if no IDs are provided. Quantity-based addons (additional users, buckets, AI tokens) prompt for quantity and default to the current value. AI input and output tokens are managed together in a single form. All purchases require confirmation before proceeding.
+
+```bash
+cosmic billing addons subscribe
+cosmic billing addons add                    # Alias
+cosmic billing addons subscribe --addon-id prod_123 --price-id price_456
+cosmic billing addons subscribe -q 5        # Set quantity for per-unit addons
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--addon-id <addonId>` | Stripe addon/product ID |
+| `--price-id <priceId>` | Stripe price ID |
+| `-q, --quantity <number>` | Quantity for per-unit addons (prompted if not provided) |
+| `--json` | Output as JSON |
+
+#### `cosmic billing addons cancel`
+
+Cancel an addon subscription.
+
+```bash
+cosmic billing addons cancel <addonId>
+cosmic billing addons rm <addonId>           # Alias
+cosmic billing addons cancel <addonId> --force
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-f, --force` | Skip confirmation |
+
+### `cosmic billing open`
+
+Open the billing management page in your browser.
+
+```bash
+cosmic billing open
+```
+
+> **Note:** Quantity-based addons (additional users, buckets, AI tokens) are managed through `cosmic billing addons subscribe`, which will prompt for quantities when applicable.
 
 ---
 

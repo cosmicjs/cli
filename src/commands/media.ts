@@ -12,6 +12,14 @@ import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import * as prompts from '../utils/prompts.js';
 import * as api from '../api/dashboard.js';
+import {
+  listMediaFolders as apiListMediaFolders,
+  createMediaFolder as apiCreateMediaFolder,
+  updateMediaFolder as apiUpdateMediaFolder,
+  deleteMediaFolder as apiDeleteMediaFolder,
+  addMediaToFolder as apiAddMediaToFolder,
+  removeMediaFromFolder as apiRemoveMediaFromFolder,
+} from '../api/dashboard/media.js';
 
 /**
  * List media
@@ -239,6 +247,204 @@ async function deleteMedia(
   }
 }
 
+// ============================================================================
+// Media Folder Commands
+// ============================================================================
+
+/**
+ * List media folders
+ */
+async function listFolders(options: { json?: boolean }): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  try {
+    spinner.start('Loading media folders...');
+    const folders = await apiListMediaFolders(bucketSlug);
+    spinner.succeed(`Found ${folders.length} folder(s)`);
+
+    if (folders.length === 0) {
+      display.info('No media folders found');
+      return;
+    }
+
+    if (options.json) {
+      display.json(folders);
+      return;
+    }
+
+    const table = display.createTable({
+      head: ['Slug', 'Title', 'Emoji'],
+    });
+
+    for (const folder of folders) {
+      table.push([
+        chalk.cyan(folder.slug),
+        folder.title,
+        folder.emoji || '-',
+      ]);
+    }
+
+    console.log(table.toString());
+  } catch (error) {
+    spinner.fail('Failed to load media folders');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Create media folder
+ */
+async function createFolder(options: {
+  title?: string;
+  slug?: string;
+  emoji?: string;
+  json?: boolean;
+}): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  const title =
+    options.title ||
+    (await prompts.text({
+      message: 'Folder title:',
+      required: true,
+    }));
+
+  try {
+    spinner.start('Creating media folder...');
+    await apiCreateMediaFolder(bucketSlug, {
+      title,
+      slug: options.slug,
+      emoji: options.emoji,
+    });
+    spinner.succeed(`Created media folder: ${chalk.cyan(title)}`);
+  } catch (error) {
+    spinner.fail('Failed to create media folder');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Update media folder
+ */
+async function updateFolder(
+  folderSlug: string,
+  options: {
+    title?: string;
+    slug?: string;
+    emoji?: string;
+    json?: boolean;
+  }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  const data: Record<string, unknown> = {};
+  if (options.title) data.title = options.title;
+  if (options.slug) data.slug = options.slug;
+  if (options.emoji) data.emoji = options.emoji;
+
+  if (Object.keys(data).length === 0) {
+    display.error('No update fields provided. Use --title, --slug, or --emoji.');
+    process.exit(1);
+  }
+
+  try {
+    spinner.start('Updating media folder...');
+    await apiUpdateMediaFolder(bucketSlug, folderSlug, data);
+    spinner.succeed(`Updated media folder: ${chalk.cyan(folderSlug)}`);
+  } catch (error) {
+    spinner.fail('Failed to update media folder');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Delete media folder
+ */
+async function deleteFolder(
+  folderSlug: string,
+  options: { force?: boolean }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  if (!options.force) {
+    const confirmed = await prompts.confirm({
+      message: `Delete media folder "${folderSlug}"? Media files in this folder will be unfiled.`,
+    });
+
+    if (!confirmed) {
+      display.info('Cancelled');
+      return;
+    }
+  }
+
+  try {
+    spinner.start('Deleting media folder...');
+    await apiDeleteMediaFolder(bucketSlug, folderSlug);
+    spinner.succeed(`Deleted media folder: ${chalk.cyan(folderSlug)}`);
+  } catch (error) {
+    spinner.fail('Failed to delete media folder');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Move media files into a folder
+ */
+async function moveToFolder(
+  ids: string[],
+  options: { folder?: string }
+): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  if (ids.length === 0) {
+    display.error('No media IDs provided');
+    process.exit(1);
+  }
+
+  const folder =
+    options.folder ||
+    (await prompts.text({
+      message: 'Target folder slug:',
+      required: true,
+    }));
+
+  try {
+    spinner.start(`Moving ${ids.length} file(s) to folder "${folder}"...`);
+    await apiAddMediaToFolder(bucketSlug, ids, folder);
+    spinner.succeed(`Moved ${ids.length} file(s) to folder: ${chalk.cyan(folder)}`);
+  } catch (error) {
+    spinner.fail('Failed to move media to folder');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
+ * Remove media files from their folder
+ */
+async function removeFromFolder(ids: string[]): Promise<void> {
+  const bucketSlug = requireBucket();
+
+  if (ids.length === 0) {
+    display.error('No media IDs provided');
+    process.exit(1);
+  }
+
+  try {
+    spinner.start(`Removing ${ids.length} file(s) from folder...`);
+    await apiRemoveMediaFromFolder(bucketSlug, ids);
+    spinner.succeed(`Removed ${ids.length} file(s) from folder`);
+  } catch (error) {
+    spinner.fail('Failed to remove media from folder');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
 /**
  * Create media commands
  */
@@ -278,6 +484,56 @@ export function createMediaCommands(program: Command): void {
     .description('Delete media files')
     .option('-f, --force', 'Skip confirmation')
     .action(deleteMedia);
+
+  mediaCmd
+    .command('move <ids...>')
+    .description('Move media files into a folder')
+    .requiredOption('-f, --folder <folder>', 'Target folder slug')
+    .action(moveToFolder);
+
+  mediaCmd
+    .command('unfolder <ids...>')
+    .description('Remove media files from their folder')
+    .action(removeFromFolder);
+
+  // Folder subcommands
+  const foldersCmd = mediaCmd
+    .command('folders')
+    .description('Manage media folders');
+
+  foldersCmd
+    .command('list')
+    .alias('ls')
+    .description('List media folders')
+    .option('--json', 'Output as JSON')
+    .action(listFolders);
+
+  foldersCmd
+    .command('create')
+    .alias('add')
+    .description('Create a media folder')
+    .option('--title <title>', 'Folder title')
+    .option('--slug <slug>', 'Folder slug')
+    .option('--emoji <emoji>', 'Folder emoji')
+    .option('--json', 'Output as JSON')
+    .action(createFolder);
+
+  foldersCmd
+    .command('update <slug>')
+    .alias('edit')
+    .description('Update a media folder')
+    .option('--title <title>', 'New title')
+    .option('--slug <slug>', 'New slug')
+    .option('--emoji <emoji>', 'New emoji')
+    .option('--json', 'Output as JSON')
+    .action(updateFolder);
+
+  foldersCmd
+    .command('delete <slug>')
+    .alias('rm')
+    .description('Delete a media folder')
+    .option('-f, --force', 'Skip confirmation')
+    .action(deleteFolder);
 }
 
 export default { createMediaCommands };

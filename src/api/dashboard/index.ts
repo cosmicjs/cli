@@ -47,7 +47,16 @@ export {
   getMedia,
   deleteMedia,
   uploadMedia,
+  listMediaFolders,
+  createMediaFolder,
+  updateMediaFolder,
+  deleteMediaFolder,
+  addMediaToFolder,
+  removeMediaFromFolder,
   type ListMediaOptions,
+  type MediaFolder,
+  type CreateMediaFolderData,
+  type UpdateMediaFolderData,
 } from './media.js';
 
 // Workflows
@@ -203,6 +212,24 @@ export {
   type CreateWebhookData,
   type UpdateWebhookData,
 } from './webhooks.js';
+
+// Billing
+export {
+  listProjectPlans,
+  addProjectPlanSubscription,
+  cancelProjectPlanSubscription,
+  listProjectAddons,
+  addProjectAddonSubscription,
+  cancelProjectAddonSubscription,
+  addProjectUserAddon,
+  addProjectBucketAddon,
+  addProjectAITokensAddon,
+  getProjectBillingPortalUrl,
+  getProjectUsage,
+  type Plan,
+  type Addon,
+  type ProjectUsageResponse,
+} from './billing.js';
 
 // AI
 export {

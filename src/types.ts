@@ -56,6 +56,14 @@ export interface Project {
   modified_at?: string;
   total_buckets?: number;
   total_users?: number;
+  plan_buckets?: number;
+  plan_users?: number;
+  additional_buckets?: number;
+  additional_users?: number;
+  additional_ai_tokens?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
   buckets?: Bucket[];
 }
 

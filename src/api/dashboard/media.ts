@@ -3,7 +3,8 @@
  * Media file operations
  */
 
-import { get, post } from '../client.js';
+import { get, post, patch, del } from '../client.js';
+import { getBucket } from './core.js';
 import type { Media } from '../../types.js';
 
 export interface ListMediaOptions {
@@ -89,4 +90,89 @@ export async function uploadMedia(
 
   const data = (await response.json()) as { media: Media };
   return data.media;
+}
+
+// ============================================================================
+// Media Folders
+// ============================================================================
+
+export interface MediaFolder {
+  title: string;
+  slug: string;
+  emoji?: string;
+}
+
+export async function listMediaFolders(
+  bucketSlug: string
+): Promise<MediaFolder[]> {
+  const bucket = await getBucket(bucketSlug) as unknown as { media_folders?: MediaFolder[] };
+  return bucket.media_folders || [];
+}
+
+export interface CreateMediaFolderData {
+  title: string;
+  slug?: string;
+  emoji?: string;
+}
+
+export async function createMediaFolder(
+  bucketSlug: string,
+  data: CreateMediaFolderData
+): Promise<{ message: string }> {
+  const response = await post<{ message: string }>('/mediaFolders/add', {
+    slug: bucketSlug,
+    data,
+  });
+  return response;
+}
+
+export interface UpdateMediaFolderData {
+  title?: string;
+  slug?: string;
+  emoji?: string;
+}
+
+export async function updateMediaFolder(
+  bucketSlug: string,
+  mediaFolderSlug: string,
+  data: UpdateMediaFolderData
+): Promise<{ message: string }> {
+  const response = await patch<{ message: string }>('/mediaFolders/update', {
+    slug: bucketSlug,
+    media_folder_slug: mediaFolderSlug,
+    data,
+  });
+  return response;
+}
+
+export async function deleteMediaFolder(
+  bucketSlug: string,
+  mediaFolderSlug: string
+): Promise<void> {
+  await del('/mediaFolders/delete', {
+    bucketSlug,
+    params: { media_folder_slug: mediaFolderSlug },
+  });
+}
+
+export async function addMediaToFolder(
+  bucketSlug: string,
+  mediaIds: string[],
+  folder: string
+): Promise<void> {
+  await post('/media/addFolderByIds', {
+    slug: bucketSlug,
+    media_ids: mediaIds,
+    folder,
+  });
+}
+
+export async function removeMediaFromFolder(
+  bucketSlug: string,
+  mediaIds: string[]
+): Promise<void> {
+  await post('/media/removeFolderByIds', {
+    slug: bucketSlug,
+    media_ids: mediaIds,
+  });
 }

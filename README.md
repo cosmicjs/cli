@@ -24,6 +24,8 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
   - [Objects](#objects)
   - [Types](#types)
   - [Media](#media)
+  - [Media Folders](#media-folders)
+  - [Billing](#billing)
   - [Repositories](#repositories)
   - [Deployments](#deployments)
   - [Webhooks](#webhooks)
@@ -45,6 +47,8 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 - **AI-Powered Chat Mode** - Interact with your content using natural language
 - **Shortcut Commands** - `content`, `build`, and `update` for common AI workflows
 - **Direct Commands** - Full CRUD for objects, media, types, repos, workflows, and agents
+- **Media Folders** - Create, update, delete folders and move media between them
+- **Billing Management** - View plans, subscribe to addons, check usage, open billing portal
 - **Team Management** - Add, update, and remove project team members
 - **Webhooks** - Create and manage webhooks for content events
 - **Domains & DNS** - Import domains, manage DNS records, connect to deployments
@@ -189,7 +193,34 @@ cosmic media list --folder=images    # Filter by folder
 cosmic media get <id>                # Get media details
 cosmic media upload ./image.png      # Upload file
 cosmic media delete <id>             # Delete media
+cosmic media move <id> --folder=photos  # Move media to a folder
+cosmic media unfolder <id>           # Remove media from folder
 ```
+
+### Media Folders
+
+```bash
+cosmic media folders list                     # List all media folders
+cosmic media folders create --title "Photos"  # Create folder
+cosmic media folders update <slug> --title "Images"  # Update folder
+cosmic media folders delete <slug>            # Delete folder
+```
+
+### Billing
+
+```bash
+cosmic billing usage                          # Show project usage statistics
+cosmic billing open                           # Open billing page in browser
+cosmic billing portal                         # Open Stripe billing portal in browser
+cosmic billing plans list                     # List available plans with pricing
+cosmic billing plans subscribe                # Subscribe to a plan (interactive, with confirmation)
+cosmic billing plans cancel                   # Cancel plan subscription
+cosmic billing addons list                    # List addons with current quantities
+cosmic billing addons subscribe               # Subscribe/update addons (interactive, with confirmation)
+cosmic billing addons cancel <addonId>        # Cancel addon subscription
+```
+
+> Quantity-based addons (users, buckets, AI tokens) are handled through `addons subscribe` -- it prompts for quantities, defaults to current values, and manages AI input/output tokens together.
 
 ### Repositories
 

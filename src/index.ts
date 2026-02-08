@@ -40,6 +40,7 @@ import { createTypesCommands } from './commands/types.js';
 import { createWebhooksCommands } from './commands/webhooks.js';
 import { createTeamCommands } from './commands/team.js';
 import { createDomainsCommands } from './commands/domains.js';
+import { createBillingCommands } from './commands/billing.js';
 import { createShellCommand } from './commands/shell.js';
 import { startChat } from './chat/repl.js';
 import { isAuthenticated } from './config/store.js';
@@ -73,6 +74,7 @@ createTypesCommands(program);
 createWebhooksCommands(program);
 createTeamCommands(program);
 createDomainsCommands(program);
+createBillingCommands(program);
 createShellCommand(program);
 
 // Add chat command (interactive mode)
@@ -277,6 +279,7 @@ program.action(async () => {
     console.log(`  ${chalk.cyan('cosmic webhooks')}   Webhook management`);
     console.log(`  ${chalk.cyan('cosmic team')}       Team member management`);
     console.log(`  ${chalk.cyan('cosmic domains')}    Domain & DNS management`);
+    console.log(`  ${chalk.cyan('cosmic billing')}    Billing, plans & usage`);
     console.log(`  ${chalk.cyan('cosmic workflows')}  Workflow operations`);
     console.log(`  ${chalk.cyan('cosmic agents')}     AI agent operations`);
     console.log(`  ${chalk.cyan('cosmic repos')}      Repository management`);
