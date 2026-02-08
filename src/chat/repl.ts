@@ -4377,6 +4377,10 @@ async function processMessage(
         let pendingEnvVars: EnvVarFromBackend[] = [];
         let envVarsRequiredBeforeDeploy = false;
 
+        // Debounced spinner for when AI text stops and backend is generating code
+        let chunkQuietTimer: ReturnType<typeof setTimeout> | null = null;
+        let codeSpinnerActive = false;
+
         const result = await streamingRepositoryUpdate({
           repositoryOwner: currentRepo.owner,
           repositoryName: currentRepo.name,
@@ -4391,6 +4395,12 @@ async function processMessage(
             // Skip empty chunks
             if (!chunk) return;
 
+            // If spinner is active and we get a new chunk, stop it first
+            if (codeSpinnerActive) {
+              spinner.stop();
+              codeSpinnerActive = false;
+            }
+
             fullText += chunk;
 
             // Debug: log raw chunks if COSMIC_DEBUG=2
@@ -4401,6 +4411,9 @@ async function processMessage(
             // Detect file edits (look for patterns like "## Editing file:" or ```diff patterns)
             const fileEditMatch = fullText.match(/(?:##\s*(?:Editing|Creating|Modifying|Updating)\s*(?:file:?)?\s*`?([^`\n]+)`?|```(?:diff|typescript|javascript|tsx|jsx)\s*\n\/\/\s*([^\n]+))/gi);
             if (fileEditMatch && fileEditMatch.length > fileCount) {
+              // File edits detected - clear quiet timer since we have file progress
+              if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+
               if (!isEditingFiles) {
                 isEditingFiles = true;
               }
@@ -4433,16 +4446,29 @@ async function processMessage(
                 }
                 lastPrintedLength = fullText.length;
               }
+
+              // Reset quiet timer - show spinner if chunks pause for 3s
+              if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+              chunkQuietTimer = setTimeout(() => {
+                console.log();
+                console.log();
+                spinner.start('Applying code changes...');
+                codeSpinnerActive = true;
+              }, 3000);
             }
           },
           onProgress: (progress) => {
             if (verbose && progress.message) {
               console.log(chalk.dim(`  [PROGRESS] ${progress.stage}: ${progress.message}`));
             }
-            // Show commit progress
+            // Update spinner text if active, otherwise show commit progress
             if (progress.stage === 'committing' || progress.stage === 'pushing') {
-              process.stdout.write(`\r${' '.repeat(60)}\r`);
-              console.log(chalk.dim(`  🔄 ${progress.message || progress.stage}...`));
+              if (codeSpinnerActive) {
+                spinner.update(progress.message || `${progress.stage}...`);
+              } else {
+                process.stdout.write(`\r${' '.repeat(60)}\r`);
+                console.log(chalk.dim(`  🔄 ${progress.message || progress.stage}...`));
+              }
             }
 
             // NEW: Detect env_vars_required event from backend
@@ -4456,6 +4482,13 @@ async function processMessage(
             }
           },
         });
+
+        // Clean up spinner/timer after stream completes
+        if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+        if (codeSpinnerActive) {
+          spinner.stop();
+          codeSpinnerActive = false;
+        }
 
         // Track if we already streamed the text
         const alreadyStreamedText = !isEditingFiles && lastPrintedLength > 0;
@@ -4688,6 +4721,9 @@ async function processMessage(
                 const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
 
                 try {
+                  let chunkQuietTimer: ReturnType<typeof setTimeout> | null = null;
+                  let codeSpinnerActive = false;
+
                   await streamingRepositoryUpdate({
                     repositoryOwner: currentRepo.owner,
                     repositoryName: currentRepo.name,
@@ -4698,17 +4734,47 @@ async function processMessage(
                       content: userMessage,
                     }],
                     onChunk: (chunk) => {
+                      // If spinner is active and we get a new chunk, stop it first
+                      if (codeSpinnerActive) {
+                        spinner.stop();
+                        codeSpinnerActive = false;
+                      }
                       process.stdout.write(chunk);
+                      // Reset quiet timer - show spinner if chunks pause for 3s
+                      if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+                      chunkQuietTimer = setTimeout(() => {
+                        console.log();
+                        console.log();
+                        spinner.start('Generating code fixes...');
+                        codeSpinnerActive = true;
+                      }, 3000);
+                    },
+                    onProgress: (progress) => {
+                      if (codeSpinnerActive && progress.message) {
+                        spinner.update(progress.message);
+                      }
                     },
                     onComplete: () => {
-                      console.log();
-                      console.log();
-                      console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                      if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+                      if (codeSpinnerActive) {
+                        spinner.succeed('AI has pushed fixes to the repository.');
+                        codeSpinnerActive = false;
+                      } else {
+                        console.log();
+                        console.log();
+                        console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                      }
                       console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
                       console.log();
                     },
                     onError: (error) => {
-                      console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                      if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+                      if (codeSpinnerActive) {
+                        spinner.fail(`AI fix failed: ${error.message}`);
+                        codeSpinnerActive = false;
+                      } else {
+                        console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                      }
                       console.log();
                     },
                   });
@@ -5379,6 +5445,9 @@ async function processMessage(
                 const userMessage = `The deployment failed with the following build logs. Please analyze the errors and fix the code:\n\n\`\`\`\n${logsText || 'No logs available'}\n\`\`\``;
 
                 try {
+                  let chunkQuietTimer: ReturnType<typeof setTimeout> | null = null;
+                  let codeSpinnerActive = false;
+
                   await streamingRepositoryUpdate({
                     repositoryOwner: repoOwner,
                     repositoryName: repoNameFromUrl,
@@ -5389,17 +5458,47 @@ async function processMessage(
                       content: userMessage, // streamingRepositoryUpdate expects content as string
                     }],
                     onChunk: (chunk) => {
+                      // If spinner is active and we get a new chunk, stop it first
+                      if (codeSpinnerActive) {
+                        spinner.stop();
+                        codeSpinnerActive = false;
+                      }
                       process.stdout.write(chunk);
+                      // Reset quiet timer - show spinner if chunks pause for 3s
+                      if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+                      chunkQuietTimer = setTimeout(() => {
+                        console.log();
+                        console.log();
+                        spinner.start('Generating code fixes...');
+                        codeSpinnerActive = true;
+                      }, 3000);
+                    },
+                    onProgress: (progress) => {
+                      if (codeSpinnerActive && progress.message) {
+                        spinner.update(progress.message);
+                      }
                     },
                     onComplete: () => {
-                      console.log();
-                      console.log();
-                      console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                      if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+                      if (codeSpinnerActive) {
+                        spinner.succeed('AI has pushed fixes to the repository.');
+                        codeSpinnerActive = false;
+                      } else {
+                        console.log();
+                        console.log();
+                        console.log(chalk.green('  ✓ AI has pushed fixes to the repository.'));
+                      }
                       console.log(chalk.dim('  Vercel will automatically redeploy with the fixes.'));
                       console.log();
                     },
                     onError: (error) => {
-                      console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                      if (chunkQuietTimer) clearTimeout(chunkQuietTimer);
+                      if (codeSpinnerActive) {
+                        spinner.fail(`AI fix failed: ${error.message}`);
+                        codeSpinnerActive = false;
+                      } else {
+                        console.log(chalk.red(`  ✗ AI fix failed: ${error.message}`));
+                      }
                       console.log();
                     },
                   });
