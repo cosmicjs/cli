@@ -107,7 +107,7 @@ export function showAITokenUpgradePrompt(
   console.log();
   console.log(chalk.yellow('  Upgrade options:'));
   console.log(chalk.dim('  1. Add more AI tokens:          ') + chalk.cyan('cosmic billing addons subscribe'));
-  console.log(chalk.dim('  2. Upgrade your plan:            ') + chalk.cyan('cosmic billing upgrade'));
+  console.log(chalk.dim('  2. Upgrade your plan:            ') + chalk.cyan('cosmic billing plans upgrade'));
   console.log(chalk.dim('  3. Use a lighter model:          ') + chalk.cyan('cosmic config set defaultModel <model>'));
   console.log(chalk.dim('  4. View current usage:           ') + chalk.cyan('cosmic billing usage'));
   console.log(chalk.dim('  5. Open billing in browser:      ') + chalk.cyan(BILLING_URL));
