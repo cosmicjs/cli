@@ -52,6 +52,7 @@ import {
 } from './mediaAttachment.js';
 import * as spinner from '../utils/spinner.js';
 import { select, multiselect, text } from '../utils/prompts.js';
+import { isAITokenLimitError, showAITokenUpgradePrompt } from '../utils/aiErrors.js';
 
 // Fallback images when Unsplash fails
 const FALLBACK_IMAGES = [
@@ -5138,18 +5139,9 @@ async function processMessage(
         console.log(chalk.dim(`    Full Error: ${JSON.stringify(err, Object.getOwnPropertyNames(err), 2)}`));
       }
 
-      // Check for token limit error
-      if (err.message?.includes('token usage limit')) {
-        console.log();
-        console.log(chalk.red('✗ AI Token Limit Reached'));
-        console.log(chalk.dim('  Your AI token usage limit has been exceeded.'));
-        console.log(chalk.dim(`  Model "${model}" uses 2x pricing tier.`));
-        console.log();
-        console.log(chalk.yellow('  Options:'));
-        console.log(chalk.dim('  1. Wait for your token quota to reset'));
-        console.log(chalk.dim('  2. Use a less expensive model with: cosmic config set defaultModel <model>'));
-        console.log(chalk.dim('  3. Upgrade your plan at https://app.cosmicjs.com/account/billing'));
-        console.log();
+      // Check for token limit / payment required error
+      if (isAITokenLimitError(err)) {
+        showAITokenUpgradePrompt(err, { model });
 
         // Remove the failed message from history
         conversationHistory.pop();

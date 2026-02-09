@@ -176,7 +176,13 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error((errorData as { message?: string }).message || `HTTP error: ${response.status}`);
+      const errMessage = (errorData as { message?: string }).message || `HTTP error: ${response.status}`;
+      const err = new Error(errMessage) as Error & { status?: number; errorCode?: string };
+      err.status = response.status;
+      if ((errorData as { error?: string }).error) {
+        err.errorCode = (errorData as { error?: string }).error;
+      }
+      throw err;
     }
 
     if (!response.body) {
@@ -376,7 +382,13 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error((errorData as { message?: string }).message || `HTTP error: ${response.status}`);
+      const errMessage = (errorData as { message?: string }).message || `HTTP error: ${response.status}`;
+      const err = new Error(errMessage) as Error & { status?: number; errorCode?: string };
+      err.status = response.status;
+      if ((errorData as { error?: string }).error) {
+        err.errorCode = (errorData as { error?: string }).error;
+      }
+      throw err;
     }
 
     if (!response.body) {

@@ -10,6 +10,7 @@ import { getDefaultModel } from '../config/store.js';
 import * as display from '../utils/display.js';
 import * as spinner from '../utils/spinner.js';
 import { getSDKClient } from '../api/sdk.js';
+import { isAITokenLimitError, showAITokenUpgradePrompt } from '../utils/aiErrors.js';
 
 /**
  * Generate text using the Cosmic SDK with streaming output
@@ -86,6 +87,12 @@ async function generateText(
     }
   } catch (error: unknown) {
     display.newline();
+
+    // Check for AI token limit / payment required errors
+    if (isAITokenLimitError(error)) {
+      showAITokenUpgradePrompt(error, { model });
+      process.exit(1);
+    }
 
     // Better error handling for SDK errors
     if (error instanceof Error) {
@@ -164,6 +171,12 @@ async function generateImage(
     }
   } catch (error: unknown) {
     spinner.fail('Failed to generate image');
+
+    // Check for AI token limit / payment required errors
+    if (isAITokenLimitError(error)) {
+      showAITokenUpgradePrompt(error);
+      process.exit(1);
+    }
 
     // Better error handling for SDK errors
     if (error instanceof Error) {
@@ -273,6 +286,12 @@ async function chat(
     }
   } catch (error: unknown) {
     display.newline();
+
+    // Check for AI token limit / payment required errors
+    if (isAITokenLimitError(error)) {
+      showAITokenUpgradePrompt(error, { model });
+      process.exit(1);
+    }
 
     // Better error handling for SDK errors
     if (error instanceof Error) {
