@@ -5,6 +5,8 @@
 
 AI-powered command-line interface for [Cosmic CMS](https://www.cosmicjs.com). Manage your content, media, repositories, deployments, workflows, and AI agents through natural language and direct commands.
 
+![Cosmic CLI](https://imgix.cosmicjs.com/c3568730-05ea-11f1-bc2b-43ecd007e1aa-cosmic-cli-screenshot-1.png?w=2000&auto=format,compression)
+
 ## Zero to Production in One Command
 
 ```bash
