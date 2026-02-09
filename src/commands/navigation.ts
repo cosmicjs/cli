@@ -352,7 +352,7 @@ async function listObjects(bucketSlug: string, typeSlug: string): Promise<void> 
 
       table.push([
         chalk.cyan(display.truncate(title, 36)),
-        chalk.dim(id),
+        id,
         display.formatStatus(status),
         display.formatDate(modified),
       ]);
