@@ -165,14 +165,22 @@ async function listProjects(): Promise<void> {
       return;
     }
 
+    const termWidth = display.getTerminalWidth();
+    const dividerWidth = Math.max(20, termWidth - 8);
+
     console.log();
     if (workspaceSlug) {
       console.log(chalk.bold.cyan(`    Projects in ${workspaceSlug}`));
     } else {
       console.log(chalk.bold.cyan('    Projects'));
     }
-    console.log(chalk.dim('    ' + '─'.repeat(60)));
+    console.log(chalk.dim('    ' + '─'.repeat(Math.min(60, dividerWidth))));
     console.log();
+
+    // Responsive column widths for project listing
+    const availWidth = Math.max(40, termWidth - 10); // 10 for left margin + emoji
+    const idWidth = Math.min(26, Math.floor(availWidth * 0.35));
+    const titleWidth = Math.min(28, Math.floor(availWidth * 0.40));
 
     for (const proj of projectList) {
       const projAny = proj as Record<string, unknown>;
@@ -181,7 +189,9 @@ async function listProjects(): Promise<void> {
       const buckets = projAny.total_buckets || 0;
       const bucketText = `${buckets} bucket${Number(buckets) !== 1 ? 's' : ''}`;
 
-      console.log(`    📁  ${chalk.cyan(id.padEnd(26))}${title.padEnd(28)}${chalk.dim(bucketText)}`);
+      const truncId = display.truncate(id, idWidth);
+      const truncTitle = display.truncate(title, titleWidth);
+      console.log(`    📁  ${chalk.cyan(truncId.padEnd(idWidth))}${truncTitle.padEnd(titleWidth)}${chalk.dim(bucketText)}`);
     }
     console.log();
     if (workspaceSlug) {
@@ -215,9 +225,11 @@ async function listBuckets(projectId: string): Promise<void> {
       return;
     }
 
+    const bucketDividerWidth = Math.min(70, Math.max(20, display.getTerminalWidth() - 8));
+
     console.log();
     console.log(chalk.bold.cyan(`    Buckets in ${projectTitle}`));
-    console.log(chalk.dim('    ' + '─'.repeat(70)));
+    console.log(chalk.dim('    ' + '─'.repeat(bucketDividerWidth)));
     console.log();
 
     for (const bucket of buckets) {
@@ -255,23 +267,25 @@ async function listObjectTypes(projectId: string, bucketSlug: string): Promise<v
 
     display.success(`Found ${objectTypes.length} object type${objectTypes.length !== 1 ? 's' : ''}`);
 
-    const table = display.createTable({
-      head: ['Title', 'Slug', 'Emoji', 'Objects'],
-    });
-
-    for (const objType of objectTypes) {
+    // Pre-compute row data
+    const rows = objectTypes.map((objType) => {
       const slug = String(objType.slug || '-');
       const title = String(objType.title || objType.singular || '-');
       const count = objType.total_objects || 0;
       const emoji = (objType.emoji as string) || '📄';
       const countText = `${count} object${Number(count) !== 1 ? 's' : ''}`;
+      return { title, slug, emoji, countText };
+    });
 
-      table.push([
-        chalk.cyan(title),
-        slug,
-        emoji,
-        countText,
-      ]);
+    // Use cli-table3 for a simple 3-column table (no emoji column).
+    // Emoji is prepended to Title to avoid width calculation issues with
+    // different terminals rendering emojis at different widths.
+    const table = display.createTable({
+      head: ['Title', 'Slug', 'Objects'],
+    });
+
+    for (const row of rows) {
+      table.push([`${row.emoji}  ${chalk.cyan(row.title)}`, row.slug, row.countText]);
     }
 
     console.log(table.toString());

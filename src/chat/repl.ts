@@ -5715,6 +5715,25 @@ function printWelcomeScreen(model: string): void {
   // Get user name
   const userName = process.env.USER || process.env.USERNAME || 'there';
 
+  const termWidth = getTerminalWidth();
+
+  // Compact mode for narrow terminals (< 60 columns)
+  if (termWidth < 60) {
+    console.log();
+    console.log(chalk.cyan.bold(`  Cosmic CLI v${version}`));
+    console.log();
+    console.log(`  Welcome, ${chalk.bold(userName)}!`);
+    console.log(`  ${modeColor.bold(modeText)}`);
+    console.log();
+    console.log(chalk.dim(`  Model: ${model}`));
+    console.log(chalk.dim(`  Context: ${formatContext()}`));
+    if (isRepoMode && currentRepo) {
+      console.log(chalk.dim(`  Repo: ${currentRepo.owner}/${currentRepo.name}`));
+    }
+    console.log();
+    return;
+  }
+
   // Calculate content widths to determine box size
   const logoWidth = 48;
   const contextText = `Context: ${formatContext()}`;
@@ -5742,7 +5761,11 @@ function printWelcomeScreen(model: string): void {
   const maxContentWidth = Math.max(...contentLines);
 
   // Inner width = max content + padding (4 chars for margins)
-  const innerWidth = maxContentWidth + 4;
+  // Cap to terminal width minus 2 (for border chars)
+  const innerWidth = Math.min(maxContentWidth + 4, termWidth - 2);
+
+  // Whether the logo fits (logo needs innerWidth >= logoWidth + 2 for padding)
+  const showLogo = innerWidth >= logoWidth + 2;
 
   // Helper to strip ANSI codes
   const stripAnsi = (str: string): string => str.replace(/\x1b\[[0-9;]*m/g, '');
@@ -5750,14 +5773,23 @@ function printWelcomeScreen(model: string): void {
   // Helper to center text
   const centerLine = (text: string, color = chalk.white): string => {
     const textLen = stripAnsi(text).length;
+    if (textLen > innerWidth) {
+      // Truncate if too long
+      return chalk.cyan('│') + color(text.slice(0, innerWidth)) + chalk.cyan('│');
+    }
     const leftPad = Math.floor((innerWidth - textLen) / 2);
     const rightPad = innerWidth - textLen - leftPad;
     return chalk.cyan('│') + ' '.repeat(leftPad) + color(text) + ' '.repeat(rightPad) + chalk.cyan('│');
   };
 
-  // Helper for left-aligned text
+  // Helper for left-aligned text with truncation
   const leftLine = (text: string): string => {
     const textLen = stripAnsi(text).length;
+    const availWidth = innerWidth - 2; // 2 chars for left margin
+    if (textLen > availWidth) {
+      // Truncate the raw text (preserving ANSI is complex, so just cap it)
+      return chalk.cyan('│') + '  ' + text.slice(0, availWidth) + chalk.cyan('│');
+    }
     const rightPad = innerWidth - textLen - 2;
     return chalk.cyan('│') + '  ' + text + ' '.repeat(Math.max(0, rightPad)) + chalk.cyan('│');
   };
@@ -5768,6 +5800,9 @@ function printWelcomeScreen(model: string): void {
   // Horizontal rule
   const hrTop = (title: string): string => {
     const borderLen = innerWidth - title.length;
+    if (borderLen < 2) {
+      return chalk.cyan('╭' + '─'.repeat(innerWidth) + '╮');
+    }
     const left = Math.floor(borderLen / 2);
     const right = borderLen - left;
     return chalk.cyan('╭' + '─'.repeat(left) + title + '─'.repeat(right) + '╮');
@@ -5781,14 +5816,16 @@ function printWelcomeScreen(model: string): void {
   console.log(hrTop(` Cosmic CLI v${version} `));
   console.log(emptyLine());
 
-  // Logo - centered
-  for (const line of COSMIC_LOGO) {
-    const leftPad = Math.floor((innerWidth - line.length) / 2);
-    const rightPad = innerWidth - line.length - leftPad;
-    console.log(chalk.cyan('│') + ' '.repeat(leftPad) + chalk.cyan(line) + ' '.repeat(rightPad) + chalk.cyan('│'));
+  // Logo - centered (only if it fits)
+  if (showLogo) {
+    for (const line of COSMIC_LOGO) {
+      const leftPad = Math.floor((innerWidth - line.length) / 2);
+      const rightPad = innerWidth - line.length - leftPad;
+      console.log(chalk.cyan('│') + ' '.repeat(leftPad) + chalk.cyan(line) + ' '.repeat(rightPad) + chalk.cyan('│'));
+    }
+    console.log(emptyLine());
   }
 
-  console.log(emptyLine());
   console.log(centerLine(`Welcome, ${userName}!`, chalk.bold.white));
 
   if (modeText) {

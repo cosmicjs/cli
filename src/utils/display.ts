@@ -46,8 +46,10 @@ export function dim(message: string): void {
  */
 export function header(message: string): void {
   console.log();
-  console.log(chalk.bold.cyan(message));
-  console.log(chalk.dim('─'.repeat(message.length)));
+  const termWidth = getTerminalWidth();
+  const displayMsg = message.length > termWidth - 2 ? message.slice(0, termWidth - 5) + '...' : message;
+  console.log(chalk.bold.cyan(displayMsg));
+  console.log(chalk.dim('─'.repeat(Math.min(displayMsg.length, termWidth - 2))));
 }
 
 /**
@@ -102,6 +104,13 @@ export function formatStatus(status: string): string {
 }
 
 /**
+ * Get terminal width (with fallback)
+ */
+export function getTerminalWidth(): number {
+  return process.stdout.columns || 80;
+}
+
+/**
  * Truncate a string to a maximum length
  */
 export function truncate(str: string | undefined | null, maxLength: number): string {
@@ -111,12 +120,43 @@ export function truncate(str: string | undefined | null, maxLength: number): str
 }
 
 /**
- * Create a table for displaying data
+ * Scale column widths to fit terminal width.
+ * Accounts for border characters: numCols + 1 border chars for cli-table3.
+ */
+function fitColWidths(colWidths: number[], termWidth: number): number[] {
+  const borderChars = colWidths.length + 1; // │ between each column + edges
+  const totalWidth = colWidths.reduce((a, b) => a + b, 0) + borderChars;
+
+  if (totalWidth <= termWidth) {
+    return colWidths; // Fits fine
+  }
+
+  // Scale proportionally, ensuring a minimum of 6 per column
+  const availableForContent = termWidth - borderChars;
+  const totalContent = colWidths.reduce((a, b) => a + b, 0);
+  const minColWidth = 6;
+
+  return colWidths.map((w) => {
+    const scaled = Math.floor((w / totalContent) * availableForContent);
+    return Math.max(minColWidth, scaled);
+  });
+}
+
+/**
+ * Create a table for displaying data.
+ * Automatically scales column widths to fit terminal width.
  */
 export function createTable(options: {
   head: string[];
   colWidths?: number[];
 }): Table.Table {
+  const termWidth = getTerminalWidth();
+
+  // If colWidths provided, scale them to fit terminal
+  const colWidths = options.colWidths
+    ? fitColWidths(options.colWidths, termWidth)
+    : undefined;
+
   const tableOptions: Table.TableConstructorOptions = {
     head: options.head.map((h) => chalk.bold.cyan(h)),
     style: {
@@ -140,11 +180,12 @@ export function createTable(options: {
       'right-mid': '┤',
       middle: '│',
     },
+    // When no colWidths, enable word wrapping to prevent overflow
+    wordWrap: !colWidths,
   };
 
-  // Only include colWidths if explicitly provided
-  if (options.colWidths) {
-    tableOptions.colWidths = options.colWidths;
+  if (colWidths) {
+    tableOptions.colWidths = colWidths;
   }
 
   return new Table(tableOptions);
@@ -169,10 +210,11 @@ export function section(title: string, items: Record<string, unknown>): void {
 }
 
 /**
- * Print a divider line
+ * Print a divider line (responsive to terminal width)
  */
 export function divider(): void {
-  console.log(chalk.dim('─'.repeat(50)));
+  const width = Math.min(50, getTerminalWidth() - 2);
+  console.log(chalk.dim('─'.repeat(Math.max(10, width))));
 }
 
 /**
@@ -218,6 +260,7 @@ export default {
   formatDate,
   formatStatus,
   truncate,
+  getTerminalWidth,
   createTable,
   keyValue,
   section,
