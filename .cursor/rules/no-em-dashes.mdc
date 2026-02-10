@@ -1,0 +1,42 @@
+---
+description: Never use em dashes in writing
+alwaysApply: true
+---
+
+# No Em Dashes
+
+Never use em dashes (—) in any writing. Use alternative punctuation instead.
+
+## Replacements
+
+**Use a hyphen (-) for:**
+- Compound modifiers: "AI-powered CLI"
+- Ranges: "pages 1-10"
+
+**Use a colon (:) for:**
+- Introducing explanations: "Here's the problem: too many tools"
+- Clarifications: "That's the key point: full lifecycle management"
+
+**Use commas (,) for:**
+- Parenthetical phrases: "The CLI, which is open source, handles deployments"
+- Separating clauses: "Create content, deploy it, iterate on it"
+
+**Use periods or semicolons for:**
+- Separating complete thoughts into distinct sentences
+
+## Examples
+
+```markdown
+❌ BAD: "The CLI handles everything—from content to deployment"
+✅ GOOD: "The CLI handles everything: from content to deployment"
+
+❌ BAD: "We built this—and it's open source"
+✅ GOOD: "We built this, and it's open source"
+
+❌ BAD: "Zero to production—all from one interface"
+✅ GOOD: "Zero to production, all from one interface"
+```
+
+## Why
+
+Em dashes create inconsistent formatting across different platforms and documents. Standard punctuation is clearer and more universally supported.
