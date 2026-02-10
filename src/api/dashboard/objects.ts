@@ -132,14 +132,14 @@ export async function publishObjects(
   bucketSlug: string,
   objectIds: string[]
 ): Promise<void> {
-  await post('/objects/publishByIds', { ids: objectIds }, { bucketSlug });
+  await post('/objects/publishByIds', { slug: bucketSlug, object_ids: objectIds }, { bucketSlug });
 }
 
 export async function unpublishObjects(
   bucketSlug: string,
   objectIds: string[]
 ): Promise<void> {
-  await post('/objects/unpublishByIds', { ids: objectIds }, { bucketSlug });
+  await post('/objects/unpublishByIds', { slug: bucketSlug, object_ids: objectIds }, { bucketSlug });
 }
 
 // ============================================================================

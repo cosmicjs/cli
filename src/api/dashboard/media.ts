@@ -37,7 +37,7 @@ export async function listMedia(
 export async function getMedia(bucketSlug: string, mediaId: string): Promise<Media> {
   const response = await get<{ media: Media }>('/media/get', {
     bucketSlug,
-    params: { id: mediaId },
+    params: { media_id: mediaId },
   });
   return response.media;
 }
