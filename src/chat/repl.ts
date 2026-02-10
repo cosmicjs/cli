@@ -6,6 +6,7 @@
 import * as readline from 'readline';
 import * as crypto from 'crypto';
 import chalk from 'chalk';
+import { CLI_VERSION } from '../version.js';
 import { isAuthenticated, getDefaultModel, getCurrentBucketSlug, setCredentials } from '../config/store.js';
 import { formatContext } from '../config/context.js';
 import { getSDKClient, hasSDKClient, clearSDKClient, getBucketKeys, getApiEnv } from '../api/sdk.js';
@@ -5685,7 +5686,7 @@ function padText(text: string, width: number, align: 'left' | 'center' | 'right'
  */
 function printWelcomeScreen(model: string): void {
   // Get version
-  const version = '1.0.0';
+  const version = CLI_VERSION;
 
   // Determine mode
   let modeText = '';

@@ -6,6 +6,7 @@
 import axios from 'axios';
 import { get, post } from '../client.js';
 import { getWorkersUrl } from '../../config/store.js';
+import { CLI_VERSION } from '../../version.js';
 import type { AIModel, AITextRequest, AITextResponse, Media } from '../../types.js';
 
 // ============================================================================
@@ -127,7 +128,7 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
     ...authHeaders,
     'Content-Type': 'application/json',
     'Origin': 'https://app.cosmicjs.com',
-    'User-Agent': 'CosmicCLI/1.0.0',
+    'User-Agent': `CosmicCLI/${CLI_VERSION}`,
   };
 
   const requestPayload: Record<string, unknown> = {
@@ -343,7 +344,7 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
     ...authHeaders,
     'Content-Type': 'application/json',
     'Origin': 'https://app.cosmicjs.com',
-    'User-Agent': 'CosmicCLI/1.0.0',
+    'User-Agent': `CosmicCLI/${CLI_VERSION}`,
   };
 
   const formattedMessages = messages.map((msg) => ({
@@ -561,7 +562,7 @@ export async function commitPendingOperations(options: CommitPendingOptions): Pr
     ...authHeaders,
     'Content-Type': 'application/json',
     'Origin': 'https://app.cosmicjs.com',
-    'User-Agent': 'CosmicCLI/1.0.0',
+    'User-Agent': `CosmicCLI/${CLI_VERSION}`,
   };
 
   const requestPayload = {

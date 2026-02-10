@@ -12,6 +12,7 @@ import {
   getApiUrl,
 } from '../config/store.js';
 import type { CosmicUser, CosmicCredentials } from '../types.js';
+import { CLI_VERSION } from '../version.js';
 
 // Token expiration buffer (refresh 5 minutes before expiry)
 const TOKEN_EXPIRY_BUFFER = 5 * 60 * 1000;
@@ -30,7 +31,7 @@ function getDashboardApiUrl(): string {
 const getCommonHeaders = (): Record<string, string> => ({
   'Content-Type': 'application/json',
   'Origin': 'https://app.cosmicjs.com',
-  'User-Agent': 'CosmicCLI/1.0.0',
+  'User-Agent': `CosmicCLI/${CLI_VERSION}`,
 });
 
 /**
@@ -253,7 +254,7 @@ export async function validateAuth(): Promise<boolean> {
         headers: {
           Authorization: `Bearer ${creds.accessToken}`,
           'Origin': 'https://app.cosmicjs.com',
-          'User-Agent': 'CosmicCLI/1.0.0',
+          'User-Agent': `CosmicCLI/${CLI_VERSION}`,
         },
       });
 

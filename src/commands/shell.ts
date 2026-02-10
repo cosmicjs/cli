@@ -15,8 +15,9 @@ import {
   getFreshContext,
 } from '../config/store.js';
 import { getCurrentUser } from '../auth/manager.js';
+import { CLI_VERSION } from '../version.js';
 
-const VERSION = '1.0.0';
+const VERSION = CLI_VERSION;
 
 /**
  * Get the shell prompt string (reads fresh from disk to catch subprocess changes)

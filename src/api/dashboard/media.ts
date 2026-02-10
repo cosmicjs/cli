@@ -5,6 +5,7 @@
 
 import { get, post, patch, del } from '../client.js';
 import { getBucket } from './core.js';
+import { CLI_VERSION } from '../../version.js';
 import type { Media } from '../../types.js';
 
 export interface ListMediaOptions {
@@ -74,7 +75,7 @@ export async function uploadMedia(
   const headers: Record<string, string> = {
     ...authHeaders,
     'Origin': 'https://app.cosmicjs.com',
-    'User-Agent': 'CosmicCLI/1.0.0',
+    'User-Agent': `CosmicCLI/${CLI_VERSION}`,
   };
 
   const response = await fetch(endpoint, {
