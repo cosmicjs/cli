@@ -89,10 +89,10 @@ async function listObjects(options: {
 
     for (const obj of objects) {
       table.push([
-        chalk.cyan(display.truncate(obj.title, 36)),
-        chalk.dim(obj.id),
+        chalk.cyan(display.truncate(obj.title, 36) || chalk.dim('-')),
+        chalk.dim(obj.id || '-'),
         display.formatStatus(obj.status),
-        obj.type,
+        obj.type || chalk.dim('-'),
         display.formatDate(obj.modified_at || obj.created_at),
       ]);
     }

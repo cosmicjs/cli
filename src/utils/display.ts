@@ -44,10 +44,11 @@ export function dim(message: string): void {
 /**
  * Print a header
  */
-export function header(message: string): void {
+export function header(message: string | undefined): void {
   console.log();
   const termWidth = getTerminalWidth();
-  const displayMsg = message.length > termWidth - 2 ? message.slice(0, termWidth - 5) + '...' : message;
+  const msg = message || 'Untitled';
+  const displayMsg = msg.length > termWidth - 2 ? msg.slice(0, termWidth - 5) + '...' : msg;
   console.log(chalk.bold.cyan(displayMsg));
   console.log(chalk.dim('─'.repeat(Math.min(displayMsg.length, termWidth - 2))));
 }
@@ -83,7 +84,8 @@ export function formatDate(dateStr: string | undefined): string {
 /**
  * Format a status badge
  */
-export function formatStatus(status: string): string {
+export function formatStatus(status: string | undefined): string {
+  if (!status) return chalk.dim('-');
   switch (status.toLowerCase()) {
     case 'published':
     case 'active':
