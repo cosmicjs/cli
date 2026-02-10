@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@cosmicjs/cli.svg)](https://www.npmjs.com/package/@cosmicjs/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-AI-powered command-line interface for [Cosmic CMS](https://www.cosmicjs.com). Manage your content, media, repositories, deployments, workflows, and AI agents through natural language and direct commands.
+AI-powered command-line interface for [Cosmic](https://www.cosmicjs.com). Manage your content, media, repositories, deployments, workflows, and AI agents through natural language and direct commands.
 
 ![Cosmic CLI](https://imgix.cosmicjs.com/c3568730-05ea-11f1-bc2b-43ecd007e1aa-cosmic-cli-screenshot-1.png?w=2000&auto=format,compression)
 
