@@ -41,6 +41,7 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 - [Configuration](#configuration)
 - [AI Models](#ai-models)
 - [Examples](#examples)
+- [Testing](#testing)
 - [Support](#support)
 
 ## Features
@@ -627,6 +628,41 @@ bun install
 bun run build
 bun run dev
 ```
+
+## Testing
+
+The CLI includes an integration test suite that runs against a real Cosmic bucket using your existing CLI credentials.
+
+### Prerequisites
+
+1. Log in to your Cosmic account:
+   ```bash
+   cosmic login
+   ```
+2. Select a bucket to test against:
+   ```bash
+   cosmic use
+   ```
+
+### Running Tests
+
+```bash
+bun test
+```
+
+This runs all tests sequentially via [Vitest](https://vitest.dev/). Each test creates resources, verifies them, and cleans up after itself. If you're not logged in or no bucket is selected, the tests will skip with a helpful message.
+
+### Test Coverage
+
+| File | Area | Operations |
+|------|------|------------|
+| `objects.test.ts` | Objects (SDK) | Create, list, get, update, delete, publish, unpublish |
+| `types.test.ts` | Object Types (Dashboard API) | Create, list, get, update, duplicate, delete |
+| `media.test.ts` | Media & Folders (Dashboard API) | List, upload, get, delete media; create, list, update, delete folders |
+| `webhooks.test.ts` | Webhooks (Dashboard API) | Create, list, get, update, delete |
+| `ai.test.ts` | AI (Dashboard API) | List models, generate text |
+| `workflows.test.ts` | Workflows (Dashboard API) | Create, list, get, update, delete |
+| `agents.test.ts` | Agents (Dashboard API) | List, get (read-only) |
 
 ## Support
 
