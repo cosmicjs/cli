@@ -1473,9 +1473,49 @@ async function processMessage(
             for (const agentJson of agentBlocks) {
               try {
                 const agentData = JSON.parse(agentJson);
+
+                // If repository agent needs repo selection, prompt user
+                if (agentData.agent_type === 'repository' &&
+                    (!agentData.repository_id || agentData.repository_id === 'TO_BE_CONFIGURED')) {
+                  try {
+                    const { repositories } = await listRepositories(bucketSlug);
+                    if (repositories.length === 0) {
+                      console.log(chalk.red('  No repositories connected to this bucket. Skipping agent.'));
+                      continue;
+                    }
+
+                    let selectedRepo;
+                    if (repositories.length === 1) {
+                      selectedRepo = repositories[0];
+                      console.log(chalk.dim(`  Auto-selected repository: ${selectedRepo.repository_name}`));
+                    } else {
+                      console.log();
+                      console.log(chalk.bold('  Select a repository for this agent:'));
+                      repositories.forEach((repo, idx) => {
+                        console.log(chalk.dim(`    ${idx + 1}. `) + chalk.cyan(repo.repository_name) + chalk.dim(` (${repo.framework || 'other'})`));
+                      });
+                      const repoAnswer = await askQuestion(rl, chalk.yellow(`  Enter number (1-${repositories.length}): `));
+                      const repoSelection = parseInt(repoAnswer, 10);
+                      if (isNaN(repoSelection) || repoSelection < 1 || repoSelection > repositories.length) {
+                        console.log(chalk.red('  Invalid selection. Skipping agent.'));
+                        continue;
+                      }
+                      selectedRepo = repositories[repoSelection - 1];
+                    }
+
+                    agentData.repository_id = selectedRepo.id;
+                    agentData.base_branch = selectedRepo.default_branch || selectedRepo.branch || 'main';
+                    console.log(chalk.green(`  ✓ Selected: ${selectedRepo.repository_name} (${agentData.base_branch})`));
+                  } catch (repoErr) {
+                    console.log(chalk.red(`  Failed to load repositories: ${(repoErr as Error).message}. Skipping agent.`));
+                    continue;
+                  }
+                }
+
                 console.log(chalk.dim(`  Creating agent: ${agentData.emoji || ''} ${agentData.agent_name}...`));
-                await createAgent(bucketSlug, agentData);
+                const result = await createAgent(bucketSlug, agentData);
                 console.log(chalk.green(`  ✓ Agent created: ${agentData.agent_name}`));
+                console.log(chalk.dim(`    ID: ${result.id}`));
               } catch (err) {
                 console.log(chalk.red(`  ✗ Failed to create agent: ${(err as Error).message}`));
               }
@@ -1484,8 +1524,9 @@ async function processMessage(
               try {
                 const workflowData = JSON.parse(workflowJson);
                 console.log(chalk.dim(`  Creating workflow: ${workflowData.emoji || ''} ${workflowData.workflow_name}...`));
-                await createWorkflow(bucketSlug, workflowData);
+                const result = await createWorkflow(bucketSlug, workflowData);
                 console.log(chalk.green(`  ✓ Workflow created: ${workflowData.workflow_name}`));
+                console.log(chalk.dim(`    ID: ${result.id}`));
               } catch (err) {
                 console.log(chalk.red(`  ✗ Failed to create workflow: ${(err as Error).message}`));
               }
