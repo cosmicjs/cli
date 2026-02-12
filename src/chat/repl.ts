@@ -1782,11 +1782,35 @@ interface ChatContext {
   links?: string[];              // External URLs to crawl for context
 }
 
+/**
+ * Extract JSON blocks tagged with a specific type from AI response text
+ * Looks for ```json:type ... ``` patterns
+ */
+function extractJsonBlocks(text: string, type: string): string[] {
+  const blocks: string[] = [];
+  const regex = new RegExp('```json:' + type + '\\s*\\n([\\s\\S]*?)```', 'g');
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    blocks.push(match[1].trim());
+  }
+  return blocks;
+}
+
+/**
+ * Promisified readline question
+ */
+function askQuestion(rl: import('readline').Interface, prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
+}
+
 interface ChatOptions {
   model?: string;
   initialPrompt?: string;  // Pre-loaded prompt to start the conversation
   buildMode?: boolean;     // Whether we're in app building mode (uses higher token limit)
   contentMode?: boolean;   // Whether we're in content creation/update mode
+  automateMode?: boolean;  // Whether we're in automation mode (create agents/workflows)
   repoMode?: boolean;      // Whether we're in repository update mode
   repoName?: string;       // Specific repository name to update
   repoBranch?: string;     // Branch to use in repo mode
@@ -1802,6 +1826,9 @@ let isBuildMode = false;
 
 // Content mode flag - when true, focused on content creation/updates
 let isContentMode = false;
+
+// Automate mode flag - when true, focused on creating agents and workflows
+let isAutomateMode = false;
 
 // Repo mode flag - when true, uses streamingRepositoryUpdate instead of regular chat
 let isRepoMode = false;
@@ -2015,13 +2042,16 @@ export async function startChat(options: ChatOptions): Promise<void> {
   // Set content mode flag if provided
   isContentMode = options.contentMode || false;
 
+  // Set automate mode flag if provided
+  isAutomateMode = options.automateMode || false;
+
   // Set ask mode flag - defaults to true (read-only mode)
-  // Build, content, and repo modes disable ask mode to allow actions
+  // Build, content, automate, and repo modes disable ask mode to allow actions
   if (options.askMode === true) {
     // Explicit ask mode (e.g., cosmic update --ask)
     isAskMode = true;
-  } else if (isBuildMode || isContentMode || isRepoMode) {
-    // Build, content, and repo modes allow actions
+  } else if (isBuildMode || isContentMode || isAutomateMode || isRepoMode) {
+    // Build, content, automate, and repo modes allow actions
     isAskMode = false;
   } else {
     // Default chat mode is ask mode (read-only)
@@ -4959,6 +4989,106 @@ async function processMessage(
             await offerContentGeneration(fullText, conversationHistory, model, bucketSlug, rl);
           }
         }
+      } else if (isAutomateMode) {
+        // Automate mode: Use streaming dashboard chat with 'automate' view_mode
+        // The backend handles the automate system prompt and context (existing agents, workflows, object types)
+        const dashboardMessages = conversationHistory.map((msg) => ({
+          role: msg.role as 'user' | 'assistant',
+          content: [{
+            type: 'text' as const,
+            text: msg.content,
+          }],
+        }));
+
+        let fullText = '';
+
+        spinner.stop();
+        console.log(chalk.dim(isAskMode ? '  Thinking...' : '  Planning automation...'));
+        console.log();
+
+        const result = await api.streamingChat({
+          messages: dashboardMessages,
+          bucketSlug,
+          model,
+          maxTokens,
+          viewMode: 'automate',
+          selectedObjectTypes: chatContext.objectTypes || [],
+          links: chatContext.links,
+          media: pendingMediaIds.length > 0 ? pendingMediaIds : undefined,
+          metadata: {
+            chat_mode: isAskMode ? 'ask' : 'agent',
+          },
+          onChunk: (chunk) => {
+            fullText += chunk;
+            // Stream the response in real-time
+            process.stdout.write(chunk);
+          },
+        });
+
+        // Clear pending media IDs after sending
+        pendingMediaIds = [];
+
+        const aiText = result?.text || fullText;
+        console.log(); // Final newline after streaming
+
+        // Track message ID and save to conversation history
+        const messageId = result?.messageId;
+        conversationHistory.push({
+          role: 'assistant',
+          content: aiText,
+        });
+
+        // Parse json:agent and json:workflow blocks from the response
+        // and offer to create them using existing tool handlers
+        const agentBlocks = extractJsonBlocks(aiText, 'agent');
+        const workflowBlocks = extractJsonBlocks(aiText, 'workflow');
+
+        if (agentBlocks.length > 0 || workflowBlocks.length > 0) {
+          console.log();
+          console.log(chalk.bold('Automation plan ready:'));
+          if (agentBlocks.length > 0) {
+            console.log(chalk.dim(`  ${agentBlocks.length} agent${agentBlocks.length !== 1 ? 's' : ''} to create`));
+          }
+          if (workflowBlocks.length > 0) {
+            console.log(chalk.dim(`  ${workflowBlocks.length} workflow${workflowBlocks.length !== 1 ? 's' : ''} to create`));
+          }
+          console.log();
+
+          // Ask for confirmation
+          const confirm = await askQuestion(rl, chalk.yellow('Create these? (y/n): '));
+          if (confirm.toLowerCase() === 'y' || confirm.toLowerCase() === 'yes') {
+            // Create agents
+            for (const agentJson of agentBlocks) {
+              try {
+                const agentData = JSON.parse(agentJson);
+                console.log(chalk.dim(`  Creating agent: ${agentData.emoji || ''} ${agentData.agent_name}...`));
+                const created = await api.createAgent(bucketSlug, agentData);
+                console.log(chalk.green(`  ✓ Agent created: ${agentData.agent_name}`));
+              } catch (err) {
+                console.log(chalk.red(`  ✗ Failed to create agent: ${(err as Error).message}`));
+              }
+            }
+            // Create workflows
+            for (const workflowJson of workflowBlocks) {
+              try {
+                const workflowData = JSON.parse(workflowJson);
+                console.log(chalk.dim(`  Creating workflow: ${workflowData.emoji || ''} ${workflowData.workflow_name}...`));
+                const created = await api.createWorkflow(bucketSlug, workflowData);
+                console.log(chalk.green(`  ✓ Workflow created: ${workflowData.workflow_name}`));
+              } catch (err) {
+                console.log(chalk.red(`  ✗ Failed to create workflow: ${(err as Error).message}`));
+              }
+            }
+          } else {
+            console.log(chalk.dim('  Skipped. You can modify the plan and try again.'));
+          }
+        }
+
+        response = {
+          text: aiText,
+          usage: result?.usage,
+          messageId,
+        };
       } else {
         // Content mode and Ask mode: Use streaming dashboard chat
         // Convert messages to the format expected by streamingChat
@@ -5697,6 +5827,9 @@ function printWelcomeScreen(model: string): void {
   } else if (isBuildMode) {
     modeText = isAskMode ? 'Build Mode (Ask)' : 'Build Mode';
     modeColor = isAskMode ? chalk.blue : chalk.green;
+  } else if (isAutomateMode) {
+    modeText = isAskMode ? 'Automate Mode (Ask)' : 'Automate Mode';
+    modeColor = isAskMode ? chalk.blue : chalk.blueBright;
   } else if (isContentMode) {
     modeText = isAskMode ? 'Content Mode (Ask)' : 'Content Mode';
     modeColor = isAskMode ? chalk.blue : chalk.yellow;
@@ -5835,6 +5968,7 @@ function printWelcomeScreen(model: string): void {
   console.log(leftLine(chalk.dim('Create and manage content:     ') + chalk.white('cosmic content')));
   console.log(leftLine(chalk.dim('Build and deploy a website:    ') + chalk.white('cosmic build')));
   console.log(leftLine(chalk.dim('Update an existing repository: ') + chalk.white('cosmic update')));
+  console.log(leftLine(chalk.dim('Create agents and workflows:   ') + chalk.white('cosmic automate')));
   console.log(leftLine(chalk.dim('Attach images: ') + chalk.white('@./image.png') + chalk.dim(' or paste a file path')));
   console.log(emptyLine());
 
@@ -5916,6 +6050,17 @@ function printHelp(): void {
   } else if (isBuildMode) {
     console.log(chalk.bold('Current Mode: ') + chalk.green('Build Mode'));
     console.log(chalk.dim('  Build and deploy a complete app from scratch.'));
+  } else if (isAutomateMode) {
+    console.log(chalk.bold('Current Mode: ') + chalk.blue('Automate Mode'));
+    console.log(chalk.dim('  Create AI agents and workflows with natural language.'));
+    console.log();
+    console.log(chalk.bold('Example prompts:'));
+    console.log(chalk.dim('  "Create an agent that writes blog posts from my content"'));
+    console.log(chalk.dim('  "Set up a workflow: scrape SEO data, write article, post to social"'));
+    console.log(chalk.dim('  "Create a content agent that generates weekly newsletters"'));
+    console.log(chalk.dim('  "Build a workflow that monitors competitors and creates reports"'));
+    console.log();
+    console.log(chalk.dim('  The AI will plan agents and workflows, then create them with your approval.'));
   } else if (isContentMode) {
     console.log(chalk.bold('Current Mode: ') + chalk.yellow('Content Mode'));
     console.log(chalk.dim('  Create and manage content with AI assistance.'));
@@ -5944,11 +6089,13 @@ function printHelp(): void {
   console.log(chalk.dim('  cosmic chat') + '             - Ask mode (read-only questions)');
   console.log(chalk.dim('  cosmic chat --content') + '   - Content mode (create/update content)');
   console.log(chalk.dim('  cosmic chat --build') + '     - Build a new app');
+  console.log(chalk.dim('  cosmic chat --automate') + '  - Create agents & workflows');
   console.log(chalk.dim('  cosmic chat --repo') + '      - Update existing code');
   console.log();
   console.log(chalk.bold('Shortcut Commands:'));
   console.log(chalk.dim('  cosmic content') + '          - Same as cosmic chat --content');
   console.log(chalk.dim('  cosmic build') + '            - Same as cosmic chat --build');
+  console.log(chalk.dim('  cosmic automate') + '         - Same as cosmic chat --automate');
   console.log(chalk.dim('  cosmic update') + '           - Same as cosmic chat --repo');
   console.log();
   console.log(chalk.bold('Context Options:'));

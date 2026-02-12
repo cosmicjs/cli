@@ -75,7 +75,7 @@ export interface StreamingChatOptions {
   bucketSlug: string;
   model?: string;
   maxTokens?: number;
-  viewMode?: 'content-model' | 'build-app' | 'agent' | 'ask';
+  viewMode?: 'content-model' | 'build-app' | 'agent' | 'ask' | 'automate';
   selectedObjectTypes?: string[];
   links?: string[];
   media?: string[];

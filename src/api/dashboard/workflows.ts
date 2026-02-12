@@ -4,11 +4,11 @@
  */
 
 import { get, post, put, del } from '../client.js';
-import type { Workflow, WorkflowExecution } from '../../types.js';
+import type { Workflow, WorkflowExecution, EventTriggerConfig } from '../../types.js';
 
 export interface ListWorkflowsOptions {
-  status?: 'active' | 'draft' | 'paused';
-  schedule_type?: 'manual' | 'cron' | 'event_triggered';
+  status?: 'active' | 'draft' | 'paused' | 'archived';
+  schedule_type?: 'manual' | 'scheduled' | 'event';
   limit?: number;
   skip?: number;
 }
@@ -77,6 +77,7 @@ export interface CreateWorkflowData {
   user_inputs?: Workflow['user_inputs'];
   schedule_type?: Workflow['schedule_type'];
   schedule_config?: Workflow['schedule_config'];
+  event_trigger_config?: EventTriggerConfig;
   status?: Workflow['status'];
 }
 
@@ -196,6 +197,19 @@ export async function cancelExecution(
   const response = await post<{ execution: WorkflowExecution }>(
     `/ai/executions/${executionId}/cancel`,
     {},
+    { bucketSlug }
+  );
+  return response.execution;
+}
+
+export async function resumeExecution(
+  bucketSlug: string,
+  executionId: string,
+  options: { approved?: boolean } = {}
+): Promise<WorkflowExecution> {
+  const response = await post<{ execution: WorkflowExecution }>(
+    `/ai/executions/${executionId}/resume`,
+    options,
     { bucketSlug }
   );
   return response.execution;
