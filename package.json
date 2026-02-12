@@ -1,6 +1,6 @@
 {
   "name": "@cosmicjs/cli",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "AI-powered CLI for managing Cosmic CMS through natural language and direct commands",
   "type": "module",
   "main": "dist/index.js",
