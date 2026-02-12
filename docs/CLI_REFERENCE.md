@@ -23,6 +23,10 @@ Complete command reference for the Cosmic CLI. For a quick overview, see the [RE
 - [AI Generation](#ai-generation)
 - [Interactive Chat](#interactive-chat)
 - [Shortcut Commands](#shortcut-commands)
+  - [`cosmic content`](#cosmic-content)
+  - [`cosmic build`](#cosmic-build)
+  - [`cosmic update`](#cosmic-update)
+  - [`cosmic automate`](#cosmic-automate)
 - [Configuration](#configuration)
 - [Command Aliases](#command-aliases)
 
@@ -105,6 +109,7 @@ chat                  # Start AI chat
 content               # Content mode chat
 build                 # Build mode chat
 update [repo]         # Update repo mode chat
+automate              # Automate mode chat (agents & workflows)
 ai generate <prompt>  # Generate text
 ai image <prompt>     # Generate image
 ```
@@ -2014,6 +2019,7 @@ cosmic chat --content          # Content mode (can modify content)
 cosmic chat --build            # Build mode (generate apps)
 cosmic chat --repo             # Repository mode (code changes)
 cosmic chat --repo my-repo     # Repo mode with specific repo
+cosmic chat --automate         # Automation mode (create agents & workflows)
 ```
 
 **Options:**
@@ -2023,6 +2029,7 @@ cosmic chat --repo my-repo     # Repo mode with specific repo
 | `--ask` | Ask mode - read-only questions |
 | `-c, --content` | Content mode - create/update content |
 | `-b, --build` | Build mode - app development |
+| `-a, --automate` | Automation mode - create agents & workflows |
 | `-r, --repo [name]` | Repository mode - code changes |
 | `--branch <branch>` | Branch to use in repo mode |
 | `-p, --prompt <prompt>` | Start with initial prompt |
@@ -2113,6 +2120,23 @@ cosmic update --ask                          # Explore code without changes
 | `-l, --links <urls>` | External URLs to include |
 | `--objects-limit <n>` | Max objects per type |
 | `--objects-depth <n>` | Nested metafield depth |
+
+### `cosmic automate`
+
+Shortcut for automation mode chat. Create AI agents and workflows with natural language.
+
+```bash
+cosmic automate                                # Start automate chat
+cosmic automate -p "Create a weekly content agent"  # With initial prompt
+cosmic automate --ask                          # Ask about automation without creating
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-m, --model <model>` | AI model to use |
+| `-p, --prompt <prompt>` | Describe what you want to automate |
+| `-a, --ask` | Ask mode (questions without creating anything) |
 
 ---
 

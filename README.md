@@ -37,6 +37,10 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
   - [Agents](#agents)
   - [AI Generation](#ai-generation)
 - [Shortcut Commands](#shortcut-commands)
+  - [Content Mode](#content-mode)
+  - [Build Mode](#build-mode)
+  - [Update Mode](#update-mode)
+  - [Automate Mode](#automate-mode)
 - [Interactive Chat Mode](#interactive-chat-mode)
 - [Configuration](#configuration)
 - [AI Models](#ai-models)
@@ -48,7 +52,7 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 
 - **Interactive Shell** - Run commands without the `cosmic` prefix
 - **AI-Powered Chat Mode** - Interact with your content using natural language
-- **Shortcut Commands** - `content`, `build`, and `update` for common AI workflows
+- **Shortcut Commands** - `content`, `build`, `update`, and `automate` for common AI workflows
 - **Direct Commands** - Full CRUD for objects, media, types, repos, workflows, and agents
 - **Media Folders** - Create, update, delete folders and move media between them
 - **Billing Management** - View plans, subscribe to addons, check usage, open billing portal
@@ -60,6 +64,7 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 - **Context Management** - Navigate workspaces, projects, and buckets like a filesystem
 - **AI Generation** - Generate text and images with streaming output
 - **AI Agents** - Content, repository, and computer use agents with scheduling
+- **AI Automation** - Create agents and workflows with natural language
 - **Auth Capture** - Capture browser auth locally for computer use agents
 
 > **Full Reference:** See [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md) for complete command documentation.
@@ -91,6 +96,7 @@ cosmic chat                 # Start AI chat mode
 cosmic content              # Create/manage content with AI
 cosmic build                # Build a new app with AI
 cosmic update my-repo       # Update existing code with AI
+cosmic automate             # Create agents & workflows with AI
 ```
 
 ## Authentication
@@ -405,6 +411,16 @@ cosmic update my-repo -p "Add dark mode"       # With instructions
 cosmic update --ask                            # Explore code without changes
 ```
 
+### Automate Mode
+
+Create AI agents and workflows with natural language:
+
+```bash
+cosmic automate                                # Start automate chat
+cosmic automate -p "Create a weekly content agent"  # With initial prompt
+cosmic automate --ask                          # Ask about automation without creating
+```
+
 ## Interactive Chat Mode
 
 Start an interactive AI chat session:
@@ -414,6 +430,7 @@ cosmic chat                  # Default ask mode (read-only)
 cosmic chat --content        # Content mode (can modify content)
 cosmic chat --build          # Build mode (generate apps)
 cosmic chat --repo           # Repository mode (code changes)
+cosmic chat --automate       # Automation mode (create agents & workflows)
 ```
 
 ### Context Options
