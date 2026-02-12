@@ -479,6 +479,11 @@ export async function executeAction(actionJson: string): Promise<string> {
             status: action.status || 'draft',
           };
 
+          // Pass schedule_config if present (cron expression, timezone, etc.)
+          if (action.schedule_config) {
+            workflowData.schedule_config = action.schedule_config;
+          }
+
           if (action.object_types && action.object_types.length > 0) {
             workflowData.shared_context = {
               objects: {
@@ -526,6 +531,7 @@ export async function executeAction(actionJson: string): Promise<string> {
         if (action.steps) updateData.steps = action.steps;
         if (action.status) updateData.status = action.status;
         if (action.schedule_type) updateData.schedule_type = action.schedule_type;
+        if (action.schedule_config) updateData.schedule_config = action.schedule_config;
 
         const workflow = await updateWorkflow(bucketSlug, action.id, updateData);
         spinner.stop();
