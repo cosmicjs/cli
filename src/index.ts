@@ -85,6 +85,7 @@ program
   .option('--ask', 'Ask mode - read-only questions, no changes')
   .option('-c, --content', 'Start in content mode (create/update content with AI)')
   .option('-b, --build', 'Start in app building mode')
+  .option('-a, --automate', 'Start in automation mode (create agents and workflows with AI)')
   .option('-r, --repo [name]', 'Start in repository update mode')
   .option('--branch <branch>', 'Branch to use in repo mode (default: main)')
   .option('-p, --prompt <prompt>', 'Start with an initial prompt')
@@ -122,10 +123,11 @@ program
       initialPrompt: options.repo ? undefined : initialPrompt, // No auto-prompt for repo mode
       buildMode: options.build,
       contentMode: options.content,
+      automateMode: options.automate,
       repoMode: !!options.repo,
       repoName: typeof options.repo === 'string' ? options.repo : undefined,
       repoBranch: options.branch,
-      askMode: options.ask || (!options.build && !options.content && !options.repo), // Explicit --ask or default when no mode flags
+      askMode: options.ask || (!options.build && !options.content && !options.repo && !options.automate), // Explicit --ask or default when no mode flags
       context: Object.keys(context).length > 0 ? context : undefined,
     });
   });
@@ -209,6 +211,22 @@ program
     });
   });
 
+// Add automate command (shortcut to chat --automate)
+program
+  .command('automate')
+  .description('Set up AI agents and workflows with natural language')
+  .option('-m, --model <model>', 'AI model to use')
+  .option('-p, --prompt <prompt>', 'Describe what you want to automate')
+  .option('-a, --ask', 'Ask mode - questions about automation without creating anything')
+  .action(async (options) => {
+    await startChat({
+      model: options.model,
+      initialPrompt: options.prompt,
+      automateMode: true,
+      askMode: options.ask || false,
+    });
+  });
+
 // Add update command (shortcut to chat --repo)
 program
   .command('update [repo]')
@@ -269,6 +287,7 @@ program.action(async () => {
     console.log(`  ${chalk.cyan('cosmic chat')}       Start interactive AI chat mode`);
     console.log(`  ${chalk.cyan('cosmic content')}    ${chalk.yellow('Create/manage content with AI')}`);
     console.log(`  ${chalk.cyan('cosmic build')}      ${chalk.green('Build an app with AI')} (creates repo & deploys)`);
+    console.log(`  ${chalk.cyan('cosmic automate')}   ${chalk.blue('Set up AI agents & workflows')} with natural language`);
     console.log(`  ${chalk.cyan('cosmic update')}     ${chalk.magenta('Update an app with AI')} (edits code & deploys)`);
     console.log(`  ${chalk.cyan('cosmic login')}      Login to your Cosmic account`);
     console.log(`  ${chalk.cyan('cosmic projects')}   List and manage projects`);

@@ -207,9 +207,10 @@ export interface Workflow {
   workflow_name: string;
   description?: string;
   emoji?: string;
-  status: 'active' | 'draft' | 'paused';
-  schedule_type: 'manual' | 'cron' | 'event_triggered';
+  status: 'active' | 'draft' | 'paused' | 'archived';
+  schedule_type: 'manual' | 'scheduled' | 'event';
   schedule_config?: ScheduleConfig;
+  event_trigger_config?: EventTriggerConfig;
   steps: WorkflowStep[];
   shared_context?: Record<string, unknown>;
   user_inputs?: UserInput[];
@@ -221,6 +222,13 @@ export interface ScheduleConfig {
   enabled: boolean;
   cron_expression?: string;
   timezone?: string;
+}
+
+export interface EventTriggerConfig {
+  event_types: ('object.created' | 'object.edited' | 'object.deleted' | 'object.published' | 'object.unpublished')[];
+  object_types?: string[];
+  filter?: Record<string, unknown>;
+  debounce_seconds?: number;
 }
 
 export interface WorkflowStep {
@@ -251,7 +259,7 @@ export interface UserInput {
 export interface WorkflowExecution {
   id: string;
   workflow_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'waiting_approval' | 'paused';
   trigger_type: 'manual' | 'scheduled' | 'event';
   started_at?: string;
   completed_at?: string;
