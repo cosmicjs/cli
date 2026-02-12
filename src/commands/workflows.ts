@@ -241,77 +241,139 @@ async function listExecutions(options: {
 }
 
 /**
- * Get execution details
+ * Check if execution status indicates it's still in progress
+ */
+function isExecutionInProgress(status: string): boolean {
+  const inProgressStatuses = ['pending', 'working', 'running', 'queued', 'in_progress', 'active'];
+  return inProgressStatuses.includes(status?.toLowerCase());
+}
+
+/**
+ * Format elapsed time in human-readable format
+ */
+function formatElapsedTime(startTime: number): string {
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
+ * Display execution details
+ */
+function displayExecution(execution: Record<string, unknown>, executionId: string): void {
+  const execId = String(execution.id || execution._id || executionId);
+  const execWorkflowId = String(execution.workflow_id || '-');
+  const execStatus = String(execution.status || 'unknown');
+  const execTrigger = String(execution.trigger_type || 'manual');
+  const execStarted = execution.started_at as string | undefined;
+  const execCompleted = execution.completed_at as string | undefined;
+  const execCurrentStep = execution.current_step as number | undefined;
+  const execError = execution.error as string | undefined;
+  // API returns 'steps' not 'step_results'
+  const execSteps = (execution.steps || execution.step_results) as Array<Record<string, unknown>> | undefined;
+
+  display.header('Workflow Execution');
+  display.keyValue('ID', execId);
+  display.keyValue('Workflow ID', execWorkflowId);
+  display.keyValue('Status', display.formatStatus(execStatus));
+  display.keyValue('Trigger', execTrigger);
+  display.keyValue('Started', display.formatDate(execStarted));
+  display.keyValue('Completed', display.formatDate(execCompleted));
+
+  if (execCurrentStep !== undefined) {
+    display.keyValue('Current Step', String(execCurrentStep + 1));
+  }
+
+  if (execError) {
+    display.subheader('Error');
+    console.log(chalk.red(String(execError)));
+  }
+
+  if (execSteps && execSteps.length > 0) {
+    display.subheader('Step Results');
+    execSteps.forEach((result, index) => {
+      const resultStatus = String(result.status || 'pending');
+      const resultError = result.error_message || result.error;
+      const stepName = String(result.name || `Step ${index + 1}`);
+      const statusIcon =
+        resultStatus === 'completed'
+          ? chalk.green('✓')
+          : resultStatus === 'failed'
+            ? chalk.red('✗')
+            : resultStatus === 'running'
+              ? chalk.blue('●')
+              : resultStatus === 'waiting_approval'
+                ? chalk.yellow('⏸')
+                : chalk.dim('○');
+
+      console.log(`  ${statusIcon} ${stepName}: ${resultStatus}`);
+      if (resultError) {
+        console.log(`     ${chalk.dim(String(resultError))}`);
+      }
+    });
+  }
+}
+
+/**
+ * Get execution details with optional polling
  */
 async function getExecution(
   executionId: string,
-  options: { json?: boolean }
+  options: { json?: boolean; watch?: boolean }
 ): Promise<void> {
   const bucketSlug = requireBucket();
+  const pollInterval = 3000; // 3 seconds
+  const startTime = Date.now();
 
   try {
     spinner.start('Loading execution...');
-    const execution = await api.getExecution(bucketSlug, executionId);
-    spinner.succeed();
+    let execution = await api.getExecution(bucketSlug, executionId) as Record<string, unknown>;
+    const execStatus = String(execution.status || 'unknown');
+
+    // If not watching or execution is already complete, show result immediately
+    if (!options.watch || !isExecutionInProgress(execStatus)) {
+      spinner.succeed();
+
+      if (options.json) {
+        display.json(execution);
+        return;
+      }
+
+      displayExecution(execution, executionId);
+      return;
+    }
+
+    // Poll while execution is in progress
+    while (isExecutionInProgress(String(execution.status || 'unknown'))) {
+      const elapsed = formatElapsedTime(startTime);
+      spinner.update(`Workflow running... (${elapsed})`);
+
+      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      execution = await api.getExecution(bucketSlug, executionId) as Record<string, unknown>;
+    }
+
+    // Execution complete
+    const totalElapsed = formatElapsedTime(startTime);
+    const finalStatus = String(execution.status || 'unknown');
+    if (finalStatus === 'completed' || finalStatus === 'success') {
+      spinner.succeed(`Workflow execution completed (${totalElapsed})`);
+    } else if (finalStatus === 'failed' || finalStatus === 'error') {
+      spinner.fail(`Workflow execution failed (${totalElapsed})`);
+    } else {
+      spinner.succeed(`Workflow execution finished with status: ${finalStatus} (${totalElapsed})`);
+    }
 
     if (options.json) {
       display.json(execution);
       return;
     }
 
-    // Handle potentially undefined execution properties
-    const execData = execution as Record<string, unknown>;
-    const execId = String(execData.id || execData._id || executionId);
-    const execWorkflowId = String(execData.workflow_id || '-');
-    const execStatus = String(execData.status || 'unknown');
-    const execTrigger = String(execData.trigger_type || 'manual');
-    const execStarted = execData.started_at as string | undefined;
-    const execCompleted = execData.completed_at as string | undefined;
-    const execCurrentStep = execData.current_step as number | undefined;
-    const execError = execData.error as string | undefined;
-    // API returns 'steps' not 'step_results'
-    const execSteps = (execData.steps || execData.step_results) as Array<Record<string, unknown>> | undefined;
-
-    display.header('Workflow Execution');
-    display.keyValue('ID', execId);
-    display.keyValue('Workflow ID', execWorkflowId);
-    display.keyValue('Status', display.formatStatus(execStatus));
-    display.keyValue('Trigger', execTrigger);
-    display.keyValue('Started', display.formatDate(execStarted));
-    display.keyValue('Completed', display.formatDate(execCompleted));
-
-    if (execCurrentStep !== undefined) {
-      display.keyValue('Current Step', String(execCurrentStep + 1));
-    }
-
-    if (execError) {
-      display.subheader('Error');
-      console.log(chalk.red(String(execError)));
-    }
-
-    if (execSteps && execSteps.length > 0) {
-      display.subheader('Step Results');
-      execSteps.forEach((result, index) => {
-        const resultStatus = String(result.status || 'pending');
-        const resultError = result.error_message || result.error;
-        const stepName = String(result.name || `Step ${index + 1}`);
-        const statusIcon =
-          resultStatus === 'completed'
-            ? chalk.green('✓')
-            : resultStatus === 'failed'
-              ? chalk.red('✗')
-              : resultStatus === 'running'
-                ? chalk.blue('●')
-                : resultStatus === 'waiting_approval'
-                  ? chalk.yellow('⏸')
-                  : chalk.dim('○');
-
-        console.log(`  ${statusIcon} ${stepName}: ${resultStatus}`);
-        if (resultError) {
-          console.log(`     ${chalk.dim(String(resultError))}`);
-        }
-      });
-    }
+    displayExecution(execution, executionId);
   } catch (error) {
     spinner.fail('Failed to load execution');
     display.error((error as Error).message);
@@ -787,6 +849,7 @@ export function createWorkflowsCommands(program: Command): void {
     .option('-w, --workflow-id <id>', 'Filter by workflow ID')
     .option('-s, --status <status>', 'Filter by status')
     .option('-l, --limit <number>', 'Limit results', '20')
+    .option('--watch', 'Watch execution and poll until complete')
     .option('--json', 'Output as JSON')
     .action((executionId, options) => {
       if (executionId) {

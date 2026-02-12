@@ -335,6 +335,7 @@ cosmic workflows remove-step <id> --step 2     # Remove step
 cosmic workflows run <id>                      # Execute workflow
 cosmic workflows executions                    # List executions
 cosmic workflows executions <execId>           # Get execution details
+cosmic workflows executions <execId> --watch   # Watch until complete
 cosmic workflows cancel <execId>               # Cancel execution
 ```
 

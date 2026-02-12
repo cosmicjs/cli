@@ -1763,6 +1763,7 @@ List or get execution details.
 cosmic workflows executions                  # List all executions
 cosmic workflows executions <executionId>    # Get specific execution
 cosmic workflows exec <executionId>          # Alias
+cosmic workflows executions <execId> --watch # Watch until complete
 ```
 
 **Options (for listing):**
@@ -1771,6 +1772,7 @@ cosmic workflows exec <executionId>          # Alias
 | `-w, --workflow-id <id>` | Filter by workflow ID |
 | `-s, --status <status>` | Filter by status |
 | `-l, --limit <n>` | Limit results (default: 20) |
+| `--watch` | Watch execution and poll until complete |
 | `--json` | Output as JSON |
 
 ### `cosmic workflows cancel`
