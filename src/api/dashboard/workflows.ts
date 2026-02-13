@@ -85,10 +85,21 @@ export async function createWorkflow(
   bucketSlug: string,
   data: CreateWorkflowData
 ): Promise<Workflow> {
-  const response = await post<{ workflow?: Workflow; data?: Workflow; success?: boolean } & Workflow>('/ai/workflows', data, {
+  const response = await post<Record<string, unknown>>('/ai/workflows', data, {
     bucketSlug,
   });
-  return response.workflow || response.data || response;
+
+  // Handle nested response: { success: true, data: { workflow: {...} } }
+  const responseData = response.data as Record<string, unknown> | undefined;
+  if (responseData && typeof responseData === 'object' && responseData.workflow) {
+    return responseData.workflow as Workflow;
+  }
+
+  if (response.workflow) {
+    return response.workflow as Workflow;
+  }
+
+  return response as unknown as Workflow;
 }
 
 export async function updateWorkflow(
