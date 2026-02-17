@@ -492,7 +492,7 @@ cosmic ai generate --model=gpt-5 "Your prompt"
 ```
 
 **Available models:**
-- **Claude (Anthropic):** `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
+- **Claude (Anthropic):** `claude-sonnet-4-6`, `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
 - **GPT (OpenAI):** `gpt-5`, `gpt-5.2`, `gpt-5-mini`, `gpt-4o`
 - **Gemini (Google):** `gemini-3-pro-preview`
 
