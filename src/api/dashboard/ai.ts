@@ -61,6 +61,39 @@ export async function generateImage(
   return response.data.media;
 }
 
+export async function generateAudio(
+  bucketSlug: string,
+  prompt: string,
+  options: { voice?: string; model?: string; folder?: string; metadata?: Record<string, unknown> } = {}
+): Promise<Media> {
+  const workersUrl = getWorkersUrl();
+  const { getBucketKeys } = await import('../../auth/manager.js');
+  const { writeKey } = getBucketKeys();
+
+  if (process.env.COSMIC_DEBUG === '1') {
+    console.log(`  [DEBUG] generateAudio:`);
+    console.log(`    Workers URL: ${workersUrl}`);
+    console.log(`    Bucket: ${bucketSlug}`);
+    console.log(`    Write Key: ${writeKey ? writeKey.substring(0, 8) + '...' : 'NOT SET'}`);
+  }
+
+  if (!writeKey) {
+    throw new Error('Write key required for audio generation. Run "cosmic use" to configure bucket keys.');
+  }
+
+  const response = await axios.post<{ media: Media }>(
+    `${workersUrl}/buckets/${bucketSlug}/ai/audio`,
+    { prompt, write_key: writeKey, ...options },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  return response.data.media;
+}
+
 // ============================================================================
 // AI Chat with Streaming (Dashboard API)
 // ============================================================================

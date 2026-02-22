@@ -199,6 +199,80 @@ async function generateImage(
 }
 
 /**
+ * Generate audio using the Cosmic SDK
+ */
+async function generateAudio(
+  text: string,
+  options: {
+    voice?: string;
+    model?: string;
+    folder?: string;
+    json?: boolean;
+  }
+): Promise<void> {
+  requireBucket();
+
+  const sdk = getSDKClient();
+  if (!sdk) {
+    display.error('SDK not configured. Run "cosmic use" to configure bucket keys.');
+    process.exit(1);
+  }
+
+  try {
+    spinner.start('Generating audio...');
+
+    const result = await sdk.ai.generateAudio({
+      prompt: text,
+      voice: options.voice as any,
+      model: options.model as any,
+      folder: options.folder,
+    });
+
+    spinner.succeed('Audio generated');
+
+    const media = result.media;
+
+    if (options.json) {
+      display.json(media);
+      return;
+    }
+
+    display.keyValue('ID', media.id);
+    display.keyValue('Name', media.name);
+    display.keyValue('URL', media.url);
+    if (media.metadata?.duration_estimate) {
+      display.keyValue('Duration', media.metadata.duration_estimate);
+    }
+    if (media.metadata?.voice) {
+      display.keyValue('Voice', media.metadata.voice);
+    }
+  } catch (error: unknown) {
+    spinner.fail('Failed to generate audio');
+
+    if (isAITokenLimitError(error)) {
+      showAITokenUpgradePrompt(error);
+      process.exit(1);
+    }
+
+    if (error instanceof Error) {
+      display.error(error.message);
+    } else if (typeof error === 'object' && error !== null) {
+      const axiosError = error as { response?: { data?: { message?: string } }; message?: string };
+      const message = axiosError.response?.data?.message || axiosError.message || JSON.stringify(error);
+      display.error(message);
+    } else {
+      display.error(String(error));
+    }
+
+    if (process.env.COSMIC_DEBUG === '1') {
+      console.log(chalk.dim('  [DEBUG] Full error:'), error);
+    }
+
+    process.exit(1);
+  }
+}
+
+/**
  * Chat with AI using the Cosmic SDK with streaming
  */
 async function chat(
@@ -348,6 +422,15 @@ export function createAICommands(program: Command): void {
     .option('-a, --alt-text <text>', 'Alt text for the image')
     .option('--json', 'Output as JSON')
     .action(generateImage);
+
+  aiCmd
+    .command('audio <text>')
+    .description('Generate audio from text using AI text-to-speech')
+    .option('-v, --voice <voice>', 'Voice to use (alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer)', 'nova')
+    .option('-m, --model <model>', 'TTS model (tts-1, tts-1-hd)', 'tts-1')
+    .option('-f, --folder <folder>', 'Target folder in media library')
+    .option('--json', 'Output as JSON')
+    .action(generateAudio);
 
   aiCmd
     .command('chat <message>')
