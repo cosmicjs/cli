@@ -62,7 +62,7 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 - **Repository & Deploy** - Connect GitHub repos and deploy to Vercel
 - **Multiple Auth Methods** - User login (JWT) or bucket keys
 - **Context Management** - Navigate workspaces, projects, and buckets like a filesystem
-- **AI Generation** - Generate text and images with streaming output
+- **AI Generation** - Generate text, images, and audio with streaming output
 - **AI Agents** - Content, repository, and computer use agents with scheduling
 - **AI Automation** - Create agents and workflows with natural language
 - **Auth Capture** - Capture browser auth locally for computer use agents
@@ -371,6 +371,8 @@ cosmic ai generate "Your prompt"               # Generate text (streaming)
 cosmic ai generate "prompt" --model=gpt-5      # Specify model
 cosmic ai image "A sunset over mountains"      # Generate image
 cosmic ai image "prompt" --folder=heroes       # Save to folder
+cosmic ai audio "Welcome to our podcast"       # Generate audio (text-to-speech)
+cosmic ai audio "prompt" --voice=alloy         # Specify voice
 cosmic ai chat "Tell me about my content"      # Single chat message
 ```
 
@@ -678,7 +680,7 @@ This runs all tests sequentially via [Vitest](https://vitest.dev/). Each test cr
 | `types.test.ts` | Object Types (Dashboard API) | Create, list, get, update, duplicate, delete |
 | `media.test.ts` | Media & Folders (Dashboard API) | List, upload, get, delete media; create, list, update, delete folders |
 | `webhooks.test.ts` | Webhooks (Dashboard API) | Create, list, get, update, delete |
-| `ai.test.ts` | AI (Dashboard API) | List models, generate text |
+| `ai.test.ts` | AI (Dashboard API) | List models, generate text, generate audio |
 | `workflows.test.ts` | Workflows (Dashboard API) | Create, list, get, update, delete |
 | `agents.test.ts` | Agents (Dashboard API) | List, get (read-only) |
 

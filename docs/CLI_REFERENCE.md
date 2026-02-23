@@ -112,6 +112,7 @@ update [repo]         # Update repo mode chat
 automate              # Automate mode chat (agents & workflows)
 ai generate <prompt>  # Generate text
 ai image <prompt>     # Generate image
+ai audio <text>       # Generate audio (TTS)
 ```
 
 #### Other Commands (in shell)
@@ -1989,6 +1990,25 @@ cosmic ai img "Your prompt"                  # Alias
 |--------|-------------|
 | `-f, --folder <folder>` | Target folder in media library |
 | `-a, --alt-text <text>` | Alt text for the image |
+| `--json` | Output as JSON |
+
+### `cosmic ai audio`
+
+Generate audio from text using AI text-to-speech. The generated audio file is uploaded to your media library.
+
+```bash
+cosmic ai audio "Welcome to our podcast"
+cosmic ai audio "Hello world" --voice=alloy    # Specify voice
+cosmic ai audio "text" --model=tts-1-hd        # High-definition model
+cosmic ai audio "text" --folder=audio           # Save to folder
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-v, --voice <voice>` | Voice to use: `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer` (default: `nova`) |
+| `-m, --model <model>` | TTS model: `tts-1`, `tts-1-hd` (default: `tts-1`) |
+| `-f, --folder <folder>` | Target folder in media library |
 | `--json` | Output as JSON |
 
 ### `cosmic ai chat`
