@@ -156,11 +156,31 @@ These options work with all commands:
 
 ### `cosmic login`
 
-Login to your Cosmic account. Opens browser for OAuth authentication.
+Login to your Cosmic account with email/password or a Personal Access Token.
 
 ```bash
+# Interactive email/password login
 cosmic login
+
+# Login with a Personal Access Token
+cosmic login --token cos_YOUR_TOKEN
 ```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `-e, --email <email>` | Email address |
+| `-p, --password <password>` | Password |
+| `-t, --token <token>` | Personal Access Token (cos_...) |
+
+**Environment variable:** Set `COSMIC_TOKEN` to authenticate without running `cosmic login`. This takes priority over stored credentials.
+
+```bash
+export COSMIC_TOKEN=cos_YOUR_TOKEN
+```
+
+Create tokens at [Account Settings > API Tokens](https://app.cosmicjs.com/account/api-tokens).
 
 ### `cosmic logout`
 

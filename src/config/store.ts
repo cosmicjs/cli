@@ -156,18 +156,24 @@ export function clearBucketCredentials(): void {
  * Check if user is authenticated
  */
 export function isAuthenticated(): boolean {
+  if (process.env.COSMIC_TOKEN) {
+    return true;
+  }
+
   const creds = getCredentials();
 
-  // Check for user auth (JWT token)
   if (creds.accessToken) {
-    // Check if token is expired
+    // PATs don't expire locally (server-side expiration only)
+    if (creds.accessToken.startsWith('cos_')) {
+      return true;
+    }
+    // Check if JWT token is expired
     if (creds.expiresAt && Date.now() >= creds.expiresAt) {
       return false;
     }
     return true;
   }
 
-  // Check for bucket key auth
   if (creds.bucketSlug && creds.readKey) {
     return true;
   }
