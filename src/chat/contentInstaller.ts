@@ -235,8 +235,7 @@ export async function installContentToCosmic(
               required: metafield.required as boolean,
             };
 
-            // For select-dropdown and check-boxes, copy options from the object type metafield
-            if ((type === 'select-dropdown' || type === 'check-boxes' || type === 'radio-buttons') && typeMetafields) {
+            if ((type === 'select-dropdown' || type === 'select' || type === 'multi-select' || type === 'check-boxes' || type === 'radio-buttons') && typeMetafields) {
               const objectTypeMetafield = typeMetafields.get(key);
               if (objectTypeMetafield?.options) {
                 formattedMetafield.options = objectTypeMetafield.options;

@@ -60,7 +60,7 @@ cosmic login && cosmic projects create && cosmic build -p "A recipe blog" && cos
 - **Webhooks** - Create and manage webhooks for content events
 - **Domains & DNS** - Import domains, manage DNS records, connect to deployments
 - **Repository & Deploy** - Connect GitHub repos and deploy to Vercel
-- **Multiple Auth Methods** - User login (JWT) or bucket keys
+- **Multiple Auth Methods** - User login, Personal Access Tokens, or bucket keys
 - **Context Management** - Navigate workspaces, projects, and buckets like a filesystem
 - **AI Generation** - Generate text, images, and audio with streaming output
 - **AI Agents** - Content, repository, and computer use agents with scheduling
@@ -110,6 +110,21 @@ cosmic login
 cosmic whoami               # Show current user
 cosmic logout               # Clear credentials
 ```
+
+### Personal Access Token
+
+Authenticate with a [Personal Access Token](https://app.cosmicjs.com/account/api-tokens) for scripts, CI/CD, and automation:
+
+```bash
+# Login with a token
+cosmic login --token cos_YOUR_TOKEN
+
+# Or set the COSMIC_TOKEN environment variable
+export COSMIC_TOKEN=cos_YOUR_TOKEN
+cosmic whoami
+```
+
+Create tokens at [Account Settings > API Tokens](https://app.cosmicjs.com/account/api-tokens). The `COSMIC_TOKEN` env var takes priority over stored credentials, making it ideal for CI/CD pipelines.
 
 ### Bucket Key Authentication
 

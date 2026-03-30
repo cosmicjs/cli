@@ -179,20 +179,67 @@ export function authenticateWithBucketKeys(
 }
 
 /**
- * Get the current access token, refreshing if needed
+ * Authenticate with a Personal Access Token (cos_ prefix).
+ * Validates the token against the API, stores it, and fetches user info.
+ */
+export async function authenticateWithToken(
+  token: string
+): Promise<{ user: CosmicUser; accessToken: string }> {
+  if (!token.startsWith('cos_')) {
+    throw new Error('Invalid token format. Personal Access Tokens start with cos_');
+  }
+
+  const response = await fetch(`${getDashboardApiUrl()}/users/get`, {
+    headers: {
+      ...getCommonHeaders(),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message = data?.message || data?.error || `Token authentication failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  if (!data?.user) {
+    throw new Error('Invalid token or token has been revoked');
+  }
+
+  setCredentials({
+    accessToken: token,
+    expiresAt: undefined,
+    user: data.user,
+  });
+
+  return {
+    user: data.user,
+    accessToken: token,
+  };
+}
+
+/**
+ * Get the current access token, refreshing if needed.
+ * Priority: COSMIC_TOKEN env var > stored credentials.
  */
 export async function getAccessToken(): Promise<string | undefined> {
+  if (process.env.COSMIC_TOKEN) {
+    return process.env.COSMIC_TOKEN;
+  }
+
   const creds = getCredentials();
 
   if (!creds.accessToken) {
     return undefined;
   }
 
-  // Check if token needs refresh
+  if (creds.accessToken.startsWith('cos_')) {
+    return creds.accessToken;
+  }
+
+  // Check if JWT token needs refresh
   if (creds.expiresAt && Date.now() >= creds.expiresAt - TOKEN_EXPIRY_BUFFER) {
-    // Token is expired or about to expire
-    // For now, we just return undefined and require re-login
-    // In the future, we could implement refresh token logic here
     return undefined;
   }
 
@@ -226,10 +273,18 @@ export function logout(): void {
 }
 
 /**
- * Check if the current auth is user-based (JWT) or bucket-key based
+ * Check if the current auth is user-based (JWT), token-based (PAT), or bucket-key based
  */
-export function getAuthType(): 'user' | 'bucket' | 'none' {
+export function getAuthType(): 'user' | 'token' | 'bucket' | 'none' {
+  if (process.env.COSMIC_TOKEN) {
+    return 'token';
+  }
+
   const creds = getCredentials();
+
+  if (creds.accessToken?.startsWith('cos_')) {
+    return 'token';
+  }
 
   if (creds.accessToken) {
     return 'user';
@@ -246,13 +301,15 @@ export function getAuthType(): 'user' | 'bucket' | 'none' {
  * Validate the current authentication by making a test API call
  */
 export async function validateAuth(): Promise<boolean> {
+  const token = process.env.COSMIC_TOKEN;
   const creds = getCredentials();
+  const accessToken = token || creds.accessToken;
 
-  if (creds.accessToken) {
+  if (accessToken) {
     try {
       const response = await fetch(`${getDashboardApiUrl()}/users/get`, {
         headers: {
-          Authorization: `Bearer ${creds.accessToken}`,
+          Authorization: `Bearer ${accessToken}`,
           'Origin': 'https://app.cosmicjs.com',
           'User-Agent': `CosmicCLI/${CLI_VERSION}`,
         },
@@ -261,8 +318,9 @@ export async function validateAuth(): Promise<boolean> {
       if (response.ok) {
         const data = await response.json();
         if (data.user) {
-          // Update stored user info
-          setCredentials({ user: data.user });
+          if (!token) {
+            setCredentials({ user: data.user });
+          }
           return true;
         }
       }
@@ -272,8 +330,6 @@ export async function validateAuth(): Promise<boolean> {
     }
   }
 
-  // For bucket key auth, we assume it's valid if keys are present
-  // The actual validation will happen when making API calls
   if (creds.bucketSlug && creds.readKey) {
     return true;
   }
@@ -282,11 +338,18 @@ export async function validateAuth(): Promise<boolean> {
 }
 
 /**
- * Get auth headers for API requests
+ * Get auth headers for API requests.
+ * Priority: COSMIC_TOKEN env var > stored credentials.
  */
 export function getAuthHeaders(): Record<string, string> {
-  const creds = getCredentials();
   const headers: Record<string, string> = {};
+
+  if (process.env.COSMIC_TOKEN) {
+    headers['Authorization'] = `Bearer ${process.env.COSMIC_TOKEN}`;
+    return headers;
+  }
+
+  const creds = getCredentials();
 
   if (creds.accessToken) {
     headers['Authorization'] = `Bearer ${creds.accessToken}`;
@@ -315,6 +378,7 @@ export default {
   verifyEmail,
   resendVerificationEmail,
   authenticateWithPassword,
+  authenticateWithToken,
   authenticateWithBucketKeys,
   getAccessToken,
   getCurrentUser,

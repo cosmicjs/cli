@@ -10,6 +10,7 @@ import {
   verifyEmail as authVerifyEmail,
   resendVerificationEmail as authResendVerification,
   authenticateWithPassword,
+  authenticateWithToken,
   authenticateWithBucketKeys,
   logout as authLogout,
   getCurrentUser,
@@ -107,7 +108,26 @@ async function resendVerification(options: { email?: string }): Promise<void> {
 /**
  * Login command
  */
-async function login(options: { email?: string; password?: string }): Promise<void> {
+async function login(options: { email?: string; password?: string; token?: string }): Promise<void> {
+  // Token-based login
+  if (options.token) {
+    try {
+      spinner.start('Authenticating with token...');
+      const result = await authenticateWithToken(options.token);
+      spinner.succeed(`Logged in as ${chalk.cyan(result.user.email)} (Personal Access Token)`);
+
+      display.newline();
+      display.info(
+        `You are in the default workspace. Use ${chalk.cyan('cosmic ls')} to see what's here.`
+      );
+    } catch (error) {
+      spinner.fail('Token authentication failed');
+      display.error((error as Error).message);
+      process.exit(1);
+    }
+    return;
+  }
+
   // Check if already logged in
   if (isAuthenticated()) {
     const user = getCurrentUser();
@@ -206,6 +226,20 @@ async function whoami(): Promise<void> {
     process.exit(1);
   }
 
+  if (authType === 'token') {
+    const user = getCurrentUser();
+    if (user) {
+      display.info(`Authenticated with Personal Access Token as ${chalk.cyan(user.email)}`);
+    } else {
+      display.info('Authenticated with Personal Access Token');
+    }
+    if (process.env.COSMIC_TOKEN) {
+      display.info(chalk.dim('(via COSMIC_TOKEN environment variable)'));
+    }
+    display.keyValue('Context', formatContext());
+    return;
+  }
+
   if (authType === 'bucket') {
     display.info('Authenticated with bucket keys');
     display.keyValue('Context', formatContext());
@@ -278,6 +312,7 @@ export function createAuthCommands(program: Command): void {
     .description('Authenticate with Cosmic')
     .option('-e, --email <email>', 'Email address')
     .option('-p, --password <password>', 'Password')
+    .option('-t, --token <token>', 'Personal Access Token (cos_...)')
     .action(login);
 
   program

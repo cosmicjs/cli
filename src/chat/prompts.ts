@@ -151,7 +151,9 @@ You can perform these actions by outputting JSON commands:
 - object: Reference to single object
 - objects: Reference to multiple objects
 - switch: Boolean toggle
-- select-dropdown: Dropdown select
+- select: Single selection dropdown (preferred, requires options array with { value } objects)
+- multi-select: Multiple selection (requires options array with { value } objects)
+- select-dropdown: Dropdown select (deprecated, use "select" instead)
 - repeater: Repeatable group of fields
 
 When a user asks to create or update content, output the JSON command on a single line starting with "ACTION:".
@@ -225,12 +227,16 @@ You can perform these actions by outputting JSON commands:
 - object: Reference to single object (requires object_type)
 - objects: Reference to multiple objects (requires object_type)
 - switch: Boolean toggle - DO NOT include "options" field, just use type: "switch"
-- select-dropdown: Dropdown select (requires options array like ["Option 1", "Option 2"])
+- select: Single selection dropdown (requires options array of { value } objects like [{"value": "Option 1"}, {"value": "Option 2"}]). Returns a plain string from the API.
+- multi-select: Multiple selection (requires options array of { value } objects). Returns a string array from the API.
+- select-dropdown: Deprecated, use "select" instead. Requires options array like ["Option 1", "Option 2"]. Returns { key, value } objects from the API.
 - radio-buttons: Radio buttons (requires options array)
 - repeater: Repeatable group of fields (requires repeater_fields array)
 
 **IMPORTANT METAFIELD RULES:**
 - For "switch" type: Do NOT include an "options" field. Just use {"title": "Featured", "key": "is_featured", "type": "switch"}
+- For "select" type: Include "options" with { value } objects: [{"value": "Draft"}, {"value": "Published"}]. Prefer "select" over "select-dropdown" for new content models.
+- For "multi-select" type: Include "options" with { value } objects, same format as "select".
 - For "object" type: Include "object_type": "<slug>" to specify which object type to reference
 - For "objects" type: Include "object_type": "<slug>" for the referenced type
 - For "file" and "files" types: Include "media_validation_type" to restrict file types:
@@ -254,6 +260,8 @@ You can perform these actions by outputting JSON commands:
   {"title": "Featured Image", "key": "featured_image", "type": "file", "media_validation_type": "image"},
   {"title": "Author", "key": "author", "type": "object", "object_type": "authors"},
   {"title": "Categories", "key": "categories", "type": "objects", "object_type": "categories"},
+  {"title": "Status", "key": "status", "type": "select", "options": [{"value": "Draft"}, {"value": "Published"}, {"value": "Archived"}]},
+  {"title": "Tags", "key": "tags", "type": "multi-select", "options": [{"value": "Tech"}, {"value": "Design"}, {"value": "Business"}]},
   {"title": "Published Date", "key": "published_date", "type": "date"},
   {"title": "Featured", "key": "is_featured", "type": "switch"}
 ]}
