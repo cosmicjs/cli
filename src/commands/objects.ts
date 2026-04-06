@@ -350,6 +350,102 @@ async function deleteObjects(
 }
 
 /**
+ * Batch operations on objects via v3 API
+ */
+async function batchObjects(options: {
+  file?: string;
+  data?: string;
+  json?: boolean;
+}): Promise<void> {
+  requireBucket();
+  const sdk = getSDKClient();
+
+  if (!sdk) {
+    display.error('SDK not available. Configure bucket keys first.');
+    process.exit(1);
+  }
+
+  let operations: Array<Record<string, unknown>>;
+
+  if (options.file) {
+    try {
+      const fs = await import('fs');
+      const raw = fs.readFileSync(options.file, 'utf-8');
+      const parsed = JSON.parse(raw);
+      operations = Array.isArray(parsed) ? parsed : parsed.operations;
+    } catch (err) {
+      display.error(`Failed to read file: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  } else if (options.data) {
+    try {
+      const parsed = JSON.parse(options.data);
+      operations = Array.isArray(parsed) ? parsed : parsed.operations;
+    } catch {
+      display.error('Invalid JSON data. Provide a valid JSON array of operations.');
+      process.exit(1);
+    }
+  } else {
+    display.error('Provide operations via --file or --data');
+    process.exit(1);
+  }
+
+  if (!operations || operations.length === 0) {
+    display.error('No operations provided.');
+    process.exit(1);
+  }
+
+  if (operations.length > 25) {
+    display.error('Maximum 25 operations per batch call.');
+    process.exit(1);
+  }
+
+  try {
+    spinner.start(`Running batch (${operations.length} operation${operations.length > 1 ? 's' : ''})...`);
+
+    const result = await (sdk.objects as any).batch(operations);
+
+    const results: Array<{ method: string; status: string; message?: string; object?: Record<string, unknown> }> =
+      result.operations || [];
+
+    const succeeded = results.filter(r => r.status === 'success').length;
+    const failed = results.filter(r => r.status === 'error').length;
+
+    if (failed === 0) {
+      spinner.succeed(`Batch complete: ${succeeded} succeeded`);
+    } else {
+      spinner.warn(`Batch complete: ${succeeded} succeeded, ${failed} failed`);
+    }
+
+    if (options.json) {
+      display.json(results);
+      return;
+    }
+
+    const table = display.createTable({
+      head: ['#', 'Method', 'Status', 'Details'],
+      colWidths: [5, 10, 10, 50],
+    });
+
+    results.forEach((r, i) => {
+      const status = r.status === 'success'
+        ? chalk.green('OK')
+        : chalk.red('FAIL');
+      const details = r.status === 'success'
+        ? (r.object as any)?.title || r.message || '-'
+        : r.message || 'Unknown error';
+      table.push([String(i + 1), r.method, status, display.truncate(details, 46)]);
+    });
+
+    console.log(table.toString());
+  } catch (error) {
+    spinner.fail('Batch operation failed');
+    display.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+/**
  * Publish objects
  */
 async function publishObjects(objectIds: string[]): Promise<void> {
@@ -496,6 +592,14 @@ export function createObjectsCommands(program: Command): void {
     .description('Delete objects')
     .option('-f, --force', 'Skip confirmation')
     .action(deleteObjects);
+
+  objectsCmd
+    .command('batch')
+    .description('Perform multiple object operations (add, edit, delete) in a single call')
+    .option('-f, --file <path>', 'JSON file containing operations array')
+    .option('-d, --data <json>', 'Inline JSON operations array')
+    .option('--json', 'Output as JSON')
+    .action(batchObjects);
 
   objectsCmd
     .command('publish <ids...>')

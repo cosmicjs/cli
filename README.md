@@ -194,6 +194,8 @@ cosmic objects get <id> --depth 2            # With nested references
 cosmic objects create --type=posts           # Create object (interactive)
 cosmic objects update <id> --title="New"     # Update object
 cosmic objects delete <id>                   # Delete object
+cosmic objects batch --file ops.json         # Batch add/edit/delete (up to 25)
+cosmic objects batch --data '[...]'          # Batch with inline JSON
 cosmic objects publish <id>                  # Publish object
 cosmic objects types                         # List object types
 ```
