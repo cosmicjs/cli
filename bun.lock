@@ -4,7 +4,7 @@
     "": {
       "name": "@cosmicjs/cli",
       "dependencies": {
-        "@cosmicjs/sdk": "^1.6.0",
+        "@cosmicjs/sdk": "^2.0.1",
         "axios": "^1.6.0",
         "chalk": "^5.3.0",
         "cli-table3": "^0.6.3",
@@ -36,7 +36,7 @@
 
     "@colors/colors": ["@colors/colors@1.5.0", "", {}, "sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ=="],
 
-    "@cosmicjs/sdk": ["@cosmicjs/sdk@1.6.0", "", { "dependencies": { "axios": "^1.3.4", "form-data": "^4.0.0" } }, "sha512-71Vxd2p1BkPXF5292djxAAo7f7qyznutInAKsk0+AIf8gHkAg6NzF3j5BLfIlVYgxJd7jz/JT0/bpZiyo7gN9A=="],
+    "@cosmicjs/sdk": ["@cosmicjs/sdk@2.0.1", "", {}, "sha512-Z1i063no/iOEiIoUL/kjRwJYdcsT/6x5S4XH3trFQJR2o9FLTwCWrYOBf8mw4MhEZp3Zax9b3qst1GLbVKXXtg=="],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.27.2", "", { "os": "aix", "cpu": "ppc64" }, "sha512-GZMB+a0mOMZs4MpDbj8RJp4cw+w1WV5NYD6xzgvzUJ5Ek2jerwfO2eADyI6ExDSUED+1X8aMbegahsJi+8mgpw=="],
 
