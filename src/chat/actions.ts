@@ -275,7 +275,7 @@ export async function executeAction(actionJson: string): Promise<string> {
             agent_name: action.name,
             agent_type: action.type || 'content',
             prompt: action.prompt || 'You are a helpful content writing assistant.',
-            model: action.model || 'claude-opus-4-5-20251101',
+            model: action.model || 'claude-opus-4-7',
             emoji: action.emoji || '🤖',
           };
 
