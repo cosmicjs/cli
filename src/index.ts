@@ -27,6 +27,7 @@ if (existsSync(envPath)) {
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createAuthCommands } from './commands/auth.js';
+import { createAgentCommands } from './commands/agent.js';
 import { createConfigCommands } from './commands/config.js';
 import { createNavigationCommands } from './commands/navigation.js';
 import { createObjectsCommands } from './commands/objects.js';
@@ -61,6 +62,7 @@ program
 
 // Register all command groups
 createAuthCommands(program);
+createAgentCommands(program);
 createConfigCommands(program);
 createNavigationCommands(program);
 createObjectsCommands(program);

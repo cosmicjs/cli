@@ -111,6 +111,24 @@ cosmic whoami               # Show current user
 cosmic logout               # Clear credentials
 ```
 
+### Agent Signup (no prior account)
+
+For AI agents that need to provision a Cosmic project from scratch on behalf of a human (no prior login required):
+
+```bash
+# Provision a project + bucket tied to a human's email. Cosmic emails them a
+# 6-digit claim code.
+cosmic agent-signup --email tony@example.com --project "Recipe Blog" --agent-id my-agent
+
+# When the human pastes the code back to the agent, run:
+cosmic agent-verify 123456
+
+# Check the current state and tier limits:
+cosmic agent-status
+```
+
+The `agent-signup` command stores the returned `agent_key` and bucket keys in `~/.cosmic/credentials.json` under the `agent` slot, so `agent-verify` and `agent-status` don't need the key on the command line. Unclaimed agent buckets are auto-deleted after 14 days, so plan to verify within that window.
+
 ### Personal Access Token
 
 Authenticate with a [Personal Access Token](https://app.cosmicjs.com/account/api-tokens) for scripts, CI/CD, and automation:
@@ -501,7 +519,7 @@ cosmic models                        # List all available models
 Set your default model:
 
 ```bash
-cosmic config set defaultModel claude-opus-4-5-20251101
+cosmic config set defaultModel claude-opus-4-7
 ```
 
 Or specify per-command:
@@ -511,7 +529,7 @@ cosmic ai generate --model=gpt-5 "Your prompt"
 ```
 
 **Available models:**
-- **Claude (Anthropic):** `claude-sonnet-4-6`, `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
+- **Claude (Anthropic):** `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
 - **GPT (OpenAI):** `gpt-5`, `gpt-5.2`, `gpt-5-mini`, `gpt-4o`
 - **Gemini (Google):** `gemini-3-pro-preview`
 

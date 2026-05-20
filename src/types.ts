@@ -24,6 +24,21 @@ export interface CosmicCredentials {
   bucketSlug?: string;
   readKey?: string;
   writeKey?: string;
+  // Agent signup auth (stored after `cosmic agent-signup` so subsequent
+  // `cosmic agent-verify` / `cosmic agent-status` calls can re-use the key
+  // without the user passing it on the command line).
+  agent?: CosmicAgentCredentials;
+}
+
+export interface CosmicAgentCredentials {
+  agentKey: string;
+  bucketSlug?: string;
+  readKey?: string;
+  writeKey?: string;
+  humanEmail: string;
+  projectId?: string;
+  projectName?: string;
+  authType?: 'unclaimed' | 'verified';
 }
 
 // User types

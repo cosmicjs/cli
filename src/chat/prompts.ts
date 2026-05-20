@@ -278,7 +278,7 @@ You can perform these actions by outputting JSON commands:
 - agent_name: string (required, 1-100 chars)
 - agent_type: "content" | "repository" | "computer_use"
 - prompt: string (required, the system prompt/instructions)
-- model: defaults to "claude-opus-4-5-20251101" (don't include unless user specifies different model)
+- model: defaults to "claude-opus-4-7" (don't include unless user specifies different model)
 - emoji: string (always include, e.g. "✍️", "📝", "🤖", "📰", "💡")
 - object_types: array of object type slugs for context (e.g. ["posts", "authors"])
 

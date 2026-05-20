@@ -17,8 +17,8 @@ import { captureAuthWithDoneButton, formatCookiesForApi, formatLocalStorageForAp
  * Default AI models by agent type
  */
 const DEFAULT_MODELS = {
-  content: 'claude-opus-4-5-20251101',
-  repository: 'claude-opus-4-5-20251101',
+  content: 'claude-opus-4-7',
+  repository: 'claude-opus-4-7',
   computer_use: 'claude-haiku-4-5-20251001',
 } as const;
 
