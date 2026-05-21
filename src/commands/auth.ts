@@ -17,7 +17,7 @@ import {
   getAuthType,
   validateAuth,
 } from '../auth/manager.js';
-import { isAuthenticated } from '../config/store.js';
+import { isAuthenticated, getCredentials } from '../config/store.js';
 import { formatContext } from '../config/context.js';
 import * as display from '../utils/display.js';
 import * as prompts from '../utils/prompts.js';
@@ -215,10 +215,27 @@ function logout(): void {
 }
 
 /**
+ * Display the agent project section (used both as primary auth and as a
+ * supplementary block when another session is active).
+ */
+function displayAgentInfo(): void {
+  const creds = getCredentials();
+  const agent = creds.agent;
+  if (!agent) return;
+  display.header('Agent Project');
+  display.keyValue('Human email', agent.humanEmail);
+  display.keyValue('Project', agent.projectName ?? chalk.dim('(unknown)'));
+  display.keyValue('Bucket', agent.bucketSlug ?? chalk.dim('(unknown)'));
+  display.keyValue('Auth type', agent.authType ?? chalk.dim('(unknown)'));
+}
+
+/**
  * Whoami command - show current user info
  */
 async function whoami(): Promise<void> {
   const authType = getAuthType();
+  const creds = getCredentials();
+  const hasAgentSlot = Boolean(creds.agent?.agentKey);
 
   if (authType === 'none') {
     display.error('Not authenticated');
@@ -237,12 +254,30 @@ async function whoami(): Promise<void> {
       display.info(chalk.dim('(via COSMIC_TOKEN environment variable)'));
     }
     display.keyValue('Context', formatContext());
+    if (hasAgentSlot) {
+      display.newline();
+      displayAgentInfo();
+    }
     return;
   }
 
   if (authType === 'bucket') {
     display.info('Authenticated with bucket keys');
     display.keyValue('Context', formatContext());
+    if (hasAgentSlot) {
+      display.newline();
+      displayAgentInfo();
+    }
+    return;
+  }
+
+  if (authType === 'agent') {
+    displayAgentInfo();
+    display.keyValue('Context', formatContext());
+    display.newline();
+    display.dim(
+      `Run ${chalk.cyan('cosmic agent-use')} to activate this bucket, or ${chalk.cyan('cosmic agent-status')} for plan and quotas.`,
+    );
     return;
   }
 
@@ -272,6 +307,11 @@ async function whoami(): Promise<void> {
     }
   } else {
     displayUserInfo(user);
+  }
+
+  if (hasAgentSlot) {
+    display.newline();
+    displayAgentInfo();
   }
 }
 

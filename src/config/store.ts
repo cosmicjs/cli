@@ -178,6 +178,10 @@ export function isAuthenticated(): boolean {
     return true;
   }
 
+  if (creds.agent?.agentKey) {
+    return true;
+  }
+
   return false;
 }
 

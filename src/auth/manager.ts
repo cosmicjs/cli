@@ -273,9 +273,10 @@ export function logout(): void {
 }
 
 /**
- * Check if the current auth is user-based (JWT), token-based (PAT), or bucket-key based
+ * Check if the current auth is user-based (JWT), token-based (PAT), bucket-key
+ * based, or agent-signup based.
  */
-export function getAuthType(): 'user' | 'token' | 'bucket' | 'none' {
+export function getAuthType(): 'user' | 'token' | 'bucket' | 'agent' | 'none' {
   if (process.env.COSMIC_TOKEN) {
     return 'token';
   }
@@ -292,6 +293,10 @@ export function getAuthType(): 'user' | 'token' | 'bucket' | 'none' {
 
   if (creds.bucketSlug && creds.readKey) {
     return 'bucket';
+  }
+
+  if (creds.agent?.agentKey) {
+    return 'agent';
   }
 
   return 'none';

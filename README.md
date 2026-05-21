@@ -120,14 +120,23 @@ For AI agents that need to provision a Cosmic project from scratch on behalf of 
 # 6-digit claim code.
 cosmic agent-signup --email tony@example.com --project "Recipe Blog" --agent-id my-agent
 
+# Switch the active CLI context to the new bucket so `cosmic ls`, `cosmic
+# content`, etc. operate on it.
+cosmic agent-use
+
 # When the human pastes the code back to the agent, run:
 cosmic agent-verify 123456
 
 # Check the current state and tier limits:
 cosmic agent-status
+
+# View the full bucket keys (read/write) created during signup:
+cosmic agent-keys
 ```
 
-The `agent-signup` command stores the returned `agent_key` and bucket keys in `~/.cosmic/credentials.json` under the `agent` slot, so `agent-verify` and `agent-status` don't need the key on the command line. Unclaimed agent buckets are auto-deleted after 14 days, so plan to verify within that window.
+The `agent-signup` command stores the returned `agent_key` and bucket keys in `~/.cosmic/credentials.json` under the `agent` slot, so `agent-verify`, `agent-status`, `agent-use`, and `agent-keys` don't need the key on the command line. Unclaimed agent buckets are auto-deleted after 14 days, so plan to verify within that window.
+
+`cosmic whoami` also reports the agent project alongside any logged-in user, so you can tell at a glance which buckets are available.
 
 ### Personal Access Token
 

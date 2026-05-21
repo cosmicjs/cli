@@ -5,9 +5,15 @@
  *                          tied to a human's email.
  * `cosmic agent-verify`  : submit the 6-digit OTP from the claim email.
  * `cosmic agent-status`  : show current auth_type, plan, claim status.
+ * `cosmic agent-use`     : promote the stored agent bucket to the active CLI
+ *                          context so `cosmic ls`, `cosmic content`, etc.
+ *                          operate on it.
+ * `cosmic agent-keys`    : reveal the full bucket read/write keys stored
+ *                          during signup.
  *
  * Credentials persist to ~/.cosmic/credentials.json under the `agent` slot
- * so subsequent verify/status calls don't need the agent_key on the CLI.
+ * so subsequent verify/status/use/keys calls don't need the agent_key on
+ * the CLI.
  */
 
 import { Command } from 'commander';
@@ -21,10 +27,20 @@ import {
 import {
   getCredentials,
   setCredentials,
+  setContext,
+  clearConfigValue,
 } from '../config/store.js';
+import { clearSDKClient } from '../api/sdk.js';
+import { formatContext } from '../config/context.js';
 import * as display from '../utils/display.js';
 import * as prompts from '../utils/prompts.js';
 import * as spinner from '../utils/spinner.js';
+
+function truncateKey(key: string | undefined): string {
+  if (!key) return chalk.dim('(none)');
+  if (key.length <= 12) return key;
+  return `${key.substring(0, 8)}...${key.substring(key.length - 4)}`;
+}
 
 const DEFAULT_AGENT_ID = 'cosmic-cli';
 
@@ -90,6 +106,8 @@ async function agentSignupCommand(options: AgentSignupOptions): Promise<void> {
       'Auto-delete in',
       `${result.auto_delete_after_days} days (unless claimed)`,
     );
+    display.keyValue('Read key', truncateKey(result.bucket?.read_key));
+    display.keyValue('Write key', truncateKey(result.bucket?.write_key));
 
     display.newline();
     display.info(
@@ -103,7 +121,7 @@ async function agentSignupCommand(options: AgentSignupOptions): Promise<void> {
     );
 
     display.newline();
-    display.dim('Stored agent_key and bucket keys in ~/.cosmic/credentials.json (agent slot).');
+    display.info(`To start using this bucket now, run ${chalk.cyan('cosmic agent-use')}.`);
   } catch (error) {
     spinner.fail('Agent signup failed');
     const err = error as Error & { status?: number; code?: string };
@@ -201,6 +219,70 @@ async function agentStatusCommand(): Promise<void> {
   }
 }
 
+async function agentUseCommand(): Promise<void> {
+  const creds = getCredentials();
+  if (!creds.agent?.agentKey) {
+    display.error(
+      `No agent project found. Run ${chalk.cyan('cosmic agent-signup')} first.`,
+    );
+    process.exit(1);
+  }
+
+  const agent = creds.agent;
+  if (!agent.bucketSlug || !agent.readKey || !agent.writeKey) {
+    display.error(
+      `Agent slot is missing bucket keys. Run ${chalk.cyan('cosmic agent-signup')} again.`,
+    );
+    process.exit(1);
+  }
+
+  setCredentials({
+    bucketSlug: agent.bucketSlug,
+    readKey: agent.readKey,
+    writeKey: agent.writeKey,
+  });
+
+  clearConfigValue('currentWorkspace');
+  clearConfigValue('currentWorkspaceId');
+  setContext(
+    undefined,
+    agent.projectName,
+    agent.bucketSlug,
+    undefined,
+    agent.projectId,
+  );
+
+  clearSDKClient();
+
+  display.success(`Switched to ${chalk.cyan(agent.bucketSlug)} bucket.`);
+  display.keyValue('Context', formatContext());
+  display.newline();
+  display.dim(
+    `Run ${chalk.cyan('cosmic agent-status')} to check claim state and limits.`,
+  );
+}
+
+async function agentKeysCommand(): Promise<void> {
+  const creds = getCredentials();
+  if (!creds.agent?.agentKey) {
+    display.error(
+      `No agent project found. Run ${chalk.cyan('cosmic agent-signup')} first.`,
+    );
+    process.exit(1);
+  }
+
+  const agent = creds.agent;
+  display.header('Agent Bucket Keys');
+  display.keyValue('Bucket', agent.bucketSlug ?? chalk.dim('(none)'));
+  display.keyValue('Read key', agent.readKey ?? chalk.dim('(none)'));
+  display.keyValue('Write key', agent.writeKey ?? chalk.dim('(none)'));
+  display.keyValue('Agent key', agent.agentKey);
+  display.newline();
+  display.dim(
+    `Run ${chalk.cyan('cosmic agent-use')} to set these as your active bucket.`,
+  );
+}
+
 export function createAgentCommands(program: Command): void {
   program
     .command('agent-signup')
@@ -223,6 +305,18 @@ export function createAgentCommands(program: Command): void {
     .command('agent-status')
     .description('Show the current agent project status, plan, and tier limits.')
     .action(agentStatusCommand);
+
+  program
+    .command('agent-use')
+    .description(
+      'Switch the active CLI context to the bucket created by the most recent agent-signup.',
+    )
+    .action(agentUseCommand);
+
+  program
+    .command('agent-keys')
+    .description('Show the full bucket keys stored from the most recent agent-signup.')
+    .action(agentKeysCommand);
 }
 
 export default { createAgentCommands };
