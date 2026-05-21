@@ -117,12 +117,14 @@ For AI agents that need to provision a Cosmic project from scratch on behalf of 
 
 ```bash
 # Provision a project + bucket tied to a human's email. Cosmic emails them a
-# 6-digit claim code.
+# 6-digit claim code. The CLI is automatically activated as the new agent
+# session, so the commands below operate on the new bucket right away.
 cosmic agent-signup --email tony@example.com --project "Recipe Blog" --agent-id my-agent
 
-# Switch the active CLI context to the new bucket so `cosmic ls`, `cosmic
-# content`, etc. operate on it.
-cosmic agent-use
+# Standard commands now work against the agent bucket:
+cosmic ls
+cosmic types create
+cosmic objects list
 
 # When the human pastes the code back to the agent, run:
 cosmic agent-verify 123456
@@ -132,11 +134,18 @@ cosmic agent-status
 
 # View the full bucket keys (read/write) created during signup:
 cosmic agent-keys
+
+# If you ran `cosmic login` and want to switch back to the agent session:
+cosmic agent-use
 ```
 
-The `agent-signup` command stores the returned `agent_key` and bucket keys in `~/.cosmic/credentials.json` under the `agent` slot, so `agent-verify`, `agent-status`, `agent-use`, and `agent-keys` don't need the key on the command line. Unclaimed agent buckets are auto-deleted after 14 days, so plan to verify within that window.
+`agent-signup` stores three credentials in `~/.cosmic/credentials.json`:
 
-`cosmic whoami` also reports the agent project alongside any logged-in user, so you can tell at a glance which buckets are available.
+- **`agent_key`** (`agk_...`): durable credential for `agent-verify` / `agent-status`.
+- **`access_token`** (user JWT): drives `cosmic whoami`, `cosmic types create`, and every other Dashboard API command. 14 days unclaimed, 90 days verified. Auto-revoked when the human claims the bucket.
+- **bucket `read_key` / `write_key`**: scoped to the bucket itself; used by the SDK and survive claim.
+
+Unclaimed agent buckets are auto-deleted after 14 days, so plan to verify within that window. `cosmic whoami` clearly labels an active agent session and shows the project + bucket it points at.
 
 ### Personal Access Token
 

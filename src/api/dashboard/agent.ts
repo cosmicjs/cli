@@ -27,6 +27,11 @@ export interface AgentSignupResponse {
   message: string;
   auth_type: 'unclaimed' | 'verified';
   agent_key: string;
+  /** User JWT scoped to the shadow user that owns the new project + bucket.
+   * Use as `Authorization: Bearer <access_token>` on Dashboard API endpoints
+   * to perform user-level operations (object types, webhooks, etc). Auto-
+   * revoked when the human claims the bucket (shadow user gets status: 0). */
+  access_token?: string;
   project: { id: string; name: string } | null;
   bucket: {
     slug: string;
@@ -46,6 +51,7 @@ export interface AgentVerifyResponse {
   message: string;
   auth_type: 'verified';
   claim_status: string;
+  access_token?: string;
   limits: null;
 }
 
@@ -55,6 +61,10 @@ export interface AgentStatusResponse {
   plan_id: string;
   limits: AgentSignupResponse['limits'] | null;
   auto_delete_after_days: number | null;
+  /** Fresh user JWT for the shadow user. Returned so a CLI/agent that lost
+   * its local credentials can recover its session by hitting /status with
+   * just the agent_key. */
+  access_token?: string;
   project: { id: string; name: string } | null;
   bucket: { slug: string } | null;
   agent_id: string | null;

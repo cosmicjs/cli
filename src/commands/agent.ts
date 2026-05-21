@@ -36,10 +36,60 @@ import * as display from '../utils/display.js';
 import * as prompts from '../utils/prompts.js';
 import * as spinner from '../utils/spinner.js';
 
+const UNCLAIMED_TOKEN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+const VERIFIED_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
 function truncateKey(key: string | undefined): string {
   if (!key) return chalk.dim('(none)');
   if (key.length <= 12) return key;
   return `${key.substring(0, 8)}...${key.substring(key.length - 4)}`;
+}
+
+interface ActivateInput {
+  accessToken: string;
+  authType: 'unclaimed' | 'verified';
+  humanEmail: string;
+  bucketSlug?: string;
+  readKey?: string;
+  writeKey?: string;
+  projectName?: string;
+  projectId?: string;
+}
+
+/**
+ * Promote a fresh agent session to the active CLI session: store the user
+ * JWT and bucket keys at the top level and switch context. This makes
+ * `cosmic ls`, `cosmic types create`, `cosmic objects`, etc. operate on the
+ * new bucket immediately without an explicit `cosmic agent-use` step.
+ */
+function activateAgentSession(input: ActivateInput): void {
+  const ttlMs =
+    input.authType === 'verified' ? VERIFIED_TOKEN_TTL_MS : UNCLAIMED_TOKEN_TTL_MS;
+  setCredentials({
+    accessToken: input.accessToken,
+    expiresAt: Date.now() + ttlMs,
+    user: {
+      id: '',
+      email: input.humanEmail,
+      first_name: 'Agent',
+      last_name: input.projectName ?? '',
+    },
+    ...(input.bucketSlug && { bucketSlug: input.bucketSlug }),
+    ...(input.readKey && { readKey: input.readKey }),
+    ...(input.writeKey && { writeKey: input.writeKey }),
+  });
+
+  clearConfigValue('currentWorkspace');
+  clearConfigValue('currentWorkspaceId');
+  setContext(
+    undefined,
+    input.projectName,
+    input.bucketSlug,
+    undefined,
+    input.projectId,
+  );
+
+  clearSDKClient();
 }
 
 const DEFAULT_AGENT_ID = 'cosmic-cli';
@@ -80,6 +130,11 @@ async function agentSignupCommand(options: AgentSignupOptions): Promise<void> {
     });
     spinner.succeed('Agent project created.');
 
+    const previousCreds = getCredentials();
+    const previousEmail = previousCreds.user?.email;
+    const previousIsAgent =
+      previousCreds.user?.first_name === 'Agent' || !previousCreds.user;
+
     setCredentials({
       agent: {
         agentKey: result.agent_key,
@@ -92,6 +147,19 @@ async function agentSignupCommand(options: AgentSignupOptions): Promise<void> {
         authType: result.auth_type,
       },
     });
+
+    if (result.access_token) {
+      activateAgentSession({
+        accessToken: result.access_token,
+        authType: result.auth_type,
+        humanEmail,
+        bucketSlug: result.bucket?.slug,
+        readKey: result.bucket?.read_key,
+        writeKey: result.bucket?.write_key,
+        projectName: result.project?.name,
+        projectId: result.project?.id,
+      });
+    }
 
     display.newline();
     display.header('Agent Project');
@@ -110,6 +178,20 @@ async function agentSignupCommand(options: AgentSignupOptions): Promise<void> {
     display.keyValue('Write key', truncateKey(result.bucket?.write_key));
 
     display.newline();
+    if (result.access_token) {
+      display.success(
+        `Switched to ${chalk.cyan(result.bucket?.slug ?? 'new bucket')}. Run ${chalk.cyan('cosmic ls')}, ${chalk.cyan('cosmic types create')}, etc.`,
+      );
+      if (previousEmail && !previousIsAgent) {
+        display.info(
+          `Previous login as ${chalk.cyan(previousEmail)} was replaced. Run ${chalk.cyan('cosmic login')} to switch back.`,
+        );
+      }
+    } else {
+      display.info(`To start using this bucket now, run ${chalk.cyan('cosmic agent-use')}.`);
+    }
+
+    display.newline();
     display.info(
       `An email with a 6-digit claim code was sent to ${chalk.cyan(humanEmail)}.`,
     );
@@ -119,9 +201,6 @@ async function agentSignupCommand(options: AgentSignupOptions): Promise<void> {
     display.info(
       `Or have the human visit ${chalk.cyan(result.claim_url)} to claim from the dashboard.`,
     );
-
-    display.newline();
-    display.info(`To start using this bucket now, run ${chalk.cyan('cosmic agent-use')}.`);
   } catch (error) {
     spinner.fail('Agent signup failed');
     const err = error as Error & { status?: number; code?: string };
@@ -165,6 +244,19 @@ async function agentVerifyCommand(otpArg?: string): Promise<void> {
       },
     });
 
+    if (result.access_token) {
+      activateAgentSession({
+        accessToken: result.access_token,
+        authType: result.auth_type,
+        humanEmail: creds.agent.humanEmail,
+        bucketSlug: creds.agent.bucketSlug,
+        readKey: creds.agent.readKey,
+        writeKey: creds.agent.writeKey,
+        projectName: creds.agent.projectName,
+        projectId: creds.agent.projectId,
+      });
+    }
+
     display.newline();
     display.info('The bucket is now on standard free-tier limits.');
     display.info(
@@ -190,6 +282,28 @@ async function agentStatusCommand(): Promise<void> {
     spinner.start('Fetching agent status...');
     const result = await getAgentStatus(creds.agent.agentKey);
     spinner.stop();
+
+    // If the server returned a fresh access_token and we're already running
+    // as this agent session (or have nothing else active), refresh the
+    // top-level JWT so it doesn't expire silently.
+    if (result.access_token) {
+      const credsNow = getCredentials();
+      const sameSession =
+        credsNow.user?.email === result.human_email ||
+        !credsNow.accessToken;
+      if (sameSession) {
+        activateAgentSession({
+          accessToken: result.access_token,
+          authType: result.auth_type,
+          humanEmail: result.human_email,
+          bucketSlug: result.bucket?.slug,
+          readKey: creds.agent.readKey,
+          writeKey: creds.agent.writeKey,
+          projectName: result.project?.name,
+          projectId: result.project?.id ?? creds.agent.projectId,
+        });
+      }
+    }
 
     display.header('Agent Status');
     display.keyValue('Human email', result.human_email);
@@ -236,30 +350,65 @@ async function agentUseCommand(): Promise<void> {
     process.exit(1);
   }
 
-  setCredentials({
-    bucketSlug: agent.bucketSlug,
-    readKey: agent.readKey,
-    writeKey: agent.writeKey,
-  });
+  // Fetch a fresh access_token via /agents/status so the user JWT is current
+  // and we can install it as the active session. The agent_key is durable;
+  // the access_token rotates on every /status call (cheap, low-risk).
+  let accessToken: string | undefined;
+  let authType: 'unclaimed' | 'verified' = agent.authType ?? 'unclaimed';
+  try {
+    spinner.start('Refreshing agent session...');
+    const status = await getAgentStatus(agent.agentKey);
+    spinner.stop();
+    accessToken = status.access_token;
+    authType = status.auth_type;
+  } catch (error) {
+    spinner.stop();
+    display.dim(
+      `Could not refresh access token (${(error as Error).message}); switching with bucket keys only.`,
+    );
+  }
 
-  clearConfigValue('currentWorkspace');
-  clearConfigValue('currentWorkspaceId');
-  setContext(
-    undefined,
-    agent.projectName,
-    agent.bucketSlug,
-    undefined,
-    agent.projectId,
-  );
-
-  clearSDKClient();
+  if (accessToken) {
+    activateAgentSession({
+      accessToken,
+      authType,
+      humanEmail: agent.humanEmail,
+      bucketSlug: agent.bucketSlug,
+      readKey: agent.readKey,
+      writeKey: agent.writeKey,
+      projectName: agent.projectName,
+      projectId: agent.projectId,
+    });
+  } else {
+    setCredentials({
+      bucketSlug: agent.bucketSlug,
+      readKey: agent.readKey,
+      writeKey: agent.writeKey,
+    });
+    clearConfigValue('currentWorkspace');
+    clearConfigValue('currentWorkspaceId');
+    setContext(
+      undefined,
+      agent.projectName,
+      agent.bucketSlug,
+      undefined,
+      agent.projectId,
+    );
+    clearSDKClient();
+  }
 
   display.success(`Switched to ${chalk.cyan(agent.bucketSlug)} bucket.`);
   display.keyValue('Context', formatContext());
   display.newline();
-  display.dim(
-    `Run ${chalk.cyan('cosmic agent-status')} to check claim state and limits.`,
-  );
+  if (accessToken) {
+    display.dim(
+      `User-level Dashboard API access enabled. ${authType === 'unclaimed' ? 'Unclaimed limits still apply until you run cosmic agent-verify.' : 'Standard plan limits apply.'}`,
+    );
+  } else {
+    display.dim(
+      `Run ${chalk.cyan('cosmic agent-status')} to check claim state and refresh your session.`,
+    );
+  }
 }
 
 async function agentKeysCommand(): Promise<void> {

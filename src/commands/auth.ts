@@ -236,11 +236,34 @@ async function whoami(): Promise<void> {
   const authType = getAuthType();
   const creds = getCredentials();
   const hasAgentSlot = Boolean(creds.agent?.agentKey);
+  // Detect "agent session via user JWT": a user-auth login created by
+  // `cosmic agent-signup` looks like a normal user-auth session but the
+  // user object is the shadow user and its email matches the agent slot.
+  // The synthetic user we install also uses first_name: 'Agent' as a
+  // marker so we can spot it without reaching for the JWT payload.
+  const isAgentJwtSession =
+    authType === 'user' &&
+    hasAgentSlot &&
+    (creds.user?.first_name === 'Agent' ||
+      creds.user?.email === creds.agent?.humanEmail);
 
   if (authType === 'none') {
     display.error('Not authenticated');
     display.info(`Run ${chalk.cyan('cosmic login')} to authenticate`);
     process.exit(1);
+  }
+
+  if (isAgentJwtSession) {
+    display.info(
+      `${chalk.green('●')} Active session: agent (${creds.agent?.authType ?? 'unclaimed'})`,
+    );
+    displayAgentInfo();
+    display.keyValue('Context', formatContext());
+    display.newline();
+    display.dim(
+      `Dashboard API + bucket keys both authorized. Run ${chalk.cyan('cosmic agent-status')} to check claim state and limits.`,
+    );
+    return;
   }
 
   if (authType === 'token') {
