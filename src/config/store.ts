@@ -18,7 +18,7 @@ const configStore = new Conf<CosmicConfig>({
   configName: 'config',
   defaults: {
     apiUrl: 'https://dapi.cosmicjs.com/v3',
-    defaultModel: 'claude-opus-4-7',
+    defaultModel: 'claude-opus-4-8',
   },
 });
 
@@ -265,7 +265,7 @@ export function getCurrentProjectId(): string | undefined {
  * Get the default AI model
  */
 export function getDefaultModel(): string {
-  return getConfigValue('defaultModel') || 'claude-opus-4-7';
+  return getConfigValue('defaultModel') || 'claude-opus-4-8';
 }
 
 /**
