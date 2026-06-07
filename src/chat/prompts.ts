@@ -143,7 +143,8 @@ You can perform these actions by outputting JSON commands:
 **METAFIELD TYPES:**
 - text: Single line text
 - textarea: Multi-line plain text
-- html-textarea: Rich text HTML editor
+- rich-text: Rich text editor (PREFERRED for new long-form content). Value is markdown prose plus optional {{name /}} block tokens that reference existing bucket-defined blocks, and may embed an existing object inline with {{object type="type-slug" id="OBJECT_ID" slug="object-slug" /}} (existing objects only; never invent ids). "object"/"objects" are reserved block names.
+- html-textarea: Legacy rich text HTML editor (deprecated; use rich-text for new fields)
 - markdown: Markdown editor
 - number: Numeric value
 - date: Date picker
@@ -218,7 +219,8 @@ You can perform these actions by outputting JSON commands:
 **METAFIELD TYPES:**
 - text: Single line text
 - textarea: Multi-line plain text
-- html-textarea: Rich text HTML editor
+- rich-text: Rich text editor (PREFERRED for new long-form content). Value is markdown prose plus optional {{name /}} block tokens that reference existing bucket-defined blocks, and may embed an existing object inline with {{object type="type-slug" id="OBJECT_ID" slug="object-slug" /}} (existing objects only; never invent ids). "object"/"objects" are reserved block names.
+- html-textarea: Legacy rich text HTML editor (deprecated; use rich-text for new fields)
 - markdown: Markdown editor
 - number: Numeric value
 - date: Date picker

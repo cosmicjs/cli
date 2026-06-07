@@ -320,7 +320,7 @@ export async function installContentToCosmic(
               } else if (key.includes('image') || key.includes('photo') || key.includes('thumbnail') || key.includes('featured')) {
                 fieldType = 'file';
               } else if (key.includes('content') || key.includes('body') || key.includes('description')) {
-                fieldType = 'html-textarea';
+                fieldType = 'rich-text';
               } else if (key.includes('date')) {
                 fieldType = 'date';
               } else if (typeof value === 'boolean') {
