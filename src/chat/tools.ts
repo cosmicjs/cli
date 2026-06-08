@@ -194,7 +194,7 @@ export function getToolDefinitions(): AITool[] {
                 key: { type: 'string', description: 'Field key/identifier' },
                 type: { 
                   type: 'string', 
-                  description: 'Field type: text, textarea, html-textarea, markdown, number, date, file, object, objects, switch, select, multi-select, select-dropdown, radio-buttons, repeater. Prefer select over select-dropdown for new content models.' 
+                  description: 'Field type: text, textarea, rich-text, html-textarea, markdown, number, date, file, object, objects, switch, select, multi-select, select-dropdown, radio-buttons, repeater. Prefer rich-text for new long-form content (markdown plus optional {{name /}} block tokens for existing bucket blocks and inline object embeds {{object type="..." id="..." slug="..." /}} for existing objects); html-textarea is deprecated. Prefer select over select-dropdown for new content models.' 
                 },
                 required: { type: 'boolean', description: 'Whether field is required' },
               },
