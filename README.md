@@ -738,6 +738,16 @@ This runs all tests sequentially via [Vitest](https://vitest.dev/). Each test cr
 | `workflows.test.ts` | Workflows (Dashboard API) | Create, list, get, update, delete |
 | `agents.test.ts` | Agents (Dashboard API) | List, get (read-only) |
 
+## Releasing
+
+Releases use the same [Changesets](https://github.com/changesets/changesets) flow as `@cosmicjs/sdk`. Add a changeset with `bunx changeset` (`patch` | `minor` | `major`). Do not hand-edit the `version` field in `package.json`.
+
+1. Merge the feature PR to `main`. [Package Checks](.github/workflows/main.yml) must pass.
+2. CI opens or updates a **Version Packages** PR that bumps the version and writes `CHANGELOG.md`.
+3. Merging that PR publishes `@cosmicjs/cli` to npm.
+
+Do not push `v*.*.*` tags by hand.
+
 ## Support
 
 - [Cosmic Documentation](https://www.cosmicjs.com/docs)

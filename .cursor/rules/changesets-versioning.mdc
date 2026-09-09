@@ -1,0 +1,28 @@
+---
+description: How to version and release the CLI (Changesets)
+globs:
+  - "**/package.json"
+  - ".changeset/**"
+alwaysApply: true
+---
+
+# Versioning: never bump `version` by hand
+
+This repo releases with [Changesets](https://github.com/changesets/changesets). The
+version in `package.json` is owned by the automation, not by humans.
+
+## Rules
+
+- NEVER manually edit the `"version"` field in `package.json`.
+- To ship a change, add a changeset: `bunx changeset` (or create a file under
+  `.changeset/`) describing the bump (`patch` | `minor` | `major`).
+- The `changeset-release/main` bot opens a "Version Packages" PR that consumes the
+  changeset, computes the next version from the **last published** version, updates
+  `CHANGELOG.md`, and deletes the changeset. Merging that PR publishes to npm.
+- Do not create `v*.*.*` tags by hand. Changesets publishes from `main`.
+
+## Checklist before committing a feature
+
+1. `package.json` `version` is unchanged from the published baseline.
+2. There is exactly one changeset describing the change.
+3. You did not hand-edit `CHANGELOG.md` (the bot writes it).
