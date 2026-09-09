@@ -15,7 +15,7 @@
     "format": "prettier --write src/**/*.ts",
     "test": "vitest run",
     "changeset": "changeset",
-    "release": "bun run build && changeset publish",
+    "release": "bun run build && npx changeset publish",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
