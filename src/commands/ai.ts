@@ -131,6 +131,8 @@ async function generateImage(
   options: {
     folder?: string;
     altText?: string;
+    format?: 'png' | 'svg';
+    aspectRatio?: string;
     json?: boolean;
   }
 ): Promise<void> {
@@ -149,6 +151,8 @@ async function generateImage(
       prompt,
       folder: options.folder,
       alt_text: options.altText,
+      ...(options.format ? { format: options.format } : {}),
+      ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
     });
 
     spinner.succeed('Image generated');
@@ -420,6 +424,8 @@ export function createAICommands(program: Command): void {
     .description('Generate an image from a prompt')
     .option('-f, --folder <folder>', 'Target folder in media library')
     .option('-a, --alt-text <text>', 'Alt text for the image')
+    .option('--format <format>', 'Output format: png or svg', 'png')
+    .option('--aspect-ratio <ratio>', 'Aspect ratio (1:1, 16:9, 9:16, 4:3, 3:4)')
     .option('--json', 'Output as JSON')
     .action(generateImage);
 

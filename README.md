@@ -424,6 +424,7 @@ cosmic ai generate "Your prompt"               # Generate text (streaming)
 cosmic ai generate "prompt" --model=gpt-5      # Specify model
 cosmic ai image "A sunset over mountains"      # Generate image
 cosmic ai image "prompt" --folder=heroes       # Save to folder
+cosmic ai image "Coffee cup icon" --format=svg # Generate an SVG icon
 cosmic ai audio "Welcome to our podcast"       # Generate audio (text-to-speech)
 cosmic ai audio "prompt" --voice=alloy         # Specify voice
 cosmic ai chat "Tell me about my content"      # Single chat message
@@ -537,7 +538,7 @@ cosmic models                        # List all available models
 Set your default model:
 
 ```bash
-cosmic config set defaultModel claude-opus-4-8
+cosmic config set defaultModel claude-opus-5
 ```
 
 Or specify per-command:
@@ -547,7 +548,7 @@ cosmic ai generate --model=gpt-5 "Your prompt"
 ```
 
 **Available models:**
-- **Claude (Anthropic):** `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-opus-4-5-20251101`, `claude-sonnet-4-5-20250929`, `claude-haiku-4-5-20251001`
+- **Claude (Anthropic):** `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-fable-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`
 - **GPT (OpenAI):** `gpt-5`, `gpt-5.2`, `gpt-5-mini`, `gpt-4o`
 - **Gemini (Google):** `gemini-3-pro-preview`
 

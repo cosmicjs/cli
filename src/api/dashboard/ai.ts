@@ -136,7 +136,7 @@ export async function streamingChat(options: StreamingChatOptions): Promise<{ te
   const {
     messages,
     bucketSlug,
-    model = 'claude-opus-4-8',
+    model = 'claude-opus-5',
     maxTokens = 32000,
     viewMode = 'build-app',
     selectedObjectTypes = [],
@@ -357,7 +357,7 @@ export async function streamingRepositoryUpdate(options: RepositoryUpdateOptions
     bucketSlug,
     messages,
     branch = 'main',
-    model = 'claude-opus-4-8',
+    model = 'claude-opus-5',
     maxTokens = 32000,
     chatMode = 'agent',
     onChunk,
